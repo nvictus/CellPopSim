@@ -19,7 +19,7 @@ class FEMethodManager(Manager):
         self.num_agents = init_num_agents
         self.max_num_agents = max_num_agents
 
-        #create objects
+        #create entities
         self.world = self._createWorld(tstart,
                                        model.world_vars,
                                        model.world_channels,
@@ -42,54 +42,40 @@ class FEMethodManager(Manager):
         agents = self.agents
         world = self.world
 
-        # get earliest event and engine
+        # get earliest event time and entity
         tmin, emin = self.timetable.peekMin()
 
         while (tmin <= tstop):
             if emin is world:
-                # TODO:synchronize local engines (fire gap channels)
-
-                # fire global event and advance clock
-                world.fireNextChannel(agents, aq, rq) #!!!!!!
-
-                if not world._enabled:
-                    return # premature termination
-
-                # reschedule last global channel and dependent channels
-                new_time = world.rescheduleChannels(agents) #!!!!!!
-                self.timetable.update(world, new_time)
-
-                # TODO:fire global gap channels
-
-                # reschedule ALL channels of active local engines
+                # synchronize agents with the world (fire gap channels)
                 for agent in agents:
-                    new_time = agent.scheduleAllChannels(world) #!!!!!!
-                    self.timetable.update(agent, new_time)
-                    #Note: could introduce some way to prevent total
-                    #      rescheduling here
-                    #Todo: skip this if global event and gap
-                    #      closure produced no modification!
+                    new_time = agent.closeGaps(tmin, world, aq, rq) #!!!!!!
+                    self.timetable.update(agents, new_time)
 
-            else: #emin is an agent
+                world.fireNextChannel(agents, aq, rq) #!!!!!!
+                new_time = world.closeGaps(tmin, agents, aq, rq) #!!!!!!
+                self.timetable.update(world, new_time)
+                if not world._enabled: # terminate simulation prematurely
+                    return
 
-                # fire event and advance clock
+                # reschedule agent channels affected by world event
+                if world._engine._is_modified:
+                    for agent in agents:
+                        new_time = agent.rescheduleWorldDependentChannels(world._engine._next_channel) #!!!!!!
+                        self.timetable.update(agent, new_time)
+
+            elif emin._enabled:  #emin is an agent
                 emin.fireNextChannel(world, aq, rq) #!!!!!!
-
-                # reschedule last channel and dependent channels
-                new_time = emin.rescheduleChannels(world) #!!!!!!
                 self.timetable.update(emin, new_time)
+                if emin._engine._is_modified:
+                    new_time = world.rescheduleAgentDependentChannels(agents, emin)
+                    self.timetable.update(world, new_time)
 
-                # TODO:fire gap channels and reschedule
+             # add/substitute new agents
+            self._processAgentQueues(tmin)
 
-                if not emin._enabled:
-                    # don't delete engine! we still may want to record its data
-                    pass
-
-            # get earliest event and engine
+            # get earliest event and entity
             tmin, emin = self.timetable.peekMin()
-
-            # add/substitute new engines and cells
-            self._processAgentQueues()
         #endwhile
 
     def _initializeTimetable(self):
@@ -102,11 +88,12 @@ class FEMethodManager(Manager):
             entities.append(agent)
         return IndexedPriorityQueue(entities, event_times)
 
-    def _processAgentQueues(self):
+    def _processAgentQueues(self, tbarrier):
         while not self._add_queue.isEmpty():
             _, new_agent = self._add_queue.popAgent()
             # reschedule to get next event time
-            time, _ = new_agent.rescheduleChannels(self.world) #!!!!!!
+            time = new_agent.rescheduleChannels(self.world) #!!!!!!
+            #time = new_agent.closeGaps(tbarrier, self.world, self._add_queue, self._rem_queue) -- I don't think we need to do gap closure!
             if self.num_agents < self.max_num_agents:
                 # add to manager
                 self.agents.append(new_agent)
@@ -146,11 +133,88 @@ class FEMethodManager(Manager):
 
 
 
+class AsyncMethodManager(Manager):
+    def __init__(self, init_num_agents, max_num_agents, tstart, model):
+        self.num_agents = init_num_agents
+        self.max_num_agents = max_num_agents
+
+        #create entities
+        self.world = self._createWorld(tstart,
+                                       model.world_vars,
+                                       model.world_channels,
+                                       model.world_dep_graph)
+        self.agents = self._createAgents(init_num_agents,
+                                         tstart,
+                                         model.agent_vars,
+                                         model.agent_channels,
+                                         model.agent_dep_graph)
+        self._add_queue = AgentQueue()
+        self._rem_queue = AgentQueue()
+
+        #initialize
+        model.init_fcn(self.agents, self.world, model.parameters)
+
+    def runSimulation(self, tstop):
+        aq = self._add_queue
+        rq = self._rem_queue
+        agents = self.agents
+        world = self.world
+
+        while (tsync <= tstop):
+            tsync = world._engine._next_event_time
+
+            for agent in agents:
+                if agents._enabled:
+                    w_affected = set()
+                    while agent.clock <= tsync:
+                        agent.fireNextChannel(world, aq, rq)
+                        if agent.is_modified: #collect affected world channels
+                            w_affected.add(agent._engine.l_to_g[agent._engine._next_channel])
+                        agent.rescheduleChannels(world)
+                    agent.closeGaps(world, aq, rq)
+
+            self._processAgentQueues()
+
+            #reschedule affected world channels
+            world.rescheduleAgentDependentChannels(agents, w_affected) #change...
+
+            world.fireNextChannel(agents, aq, rq)
+            world.rescheduleChannels(agents)
+            world.closeGaps(agents, aq, rq)
+
+            if world._is_modified:
+                for agent in agents:
+                    agent.rescheduleWorldDependentChannels(world)
+
+    def _processAgentQueues(self):
+        targets = set()
+        while not self._add_queue.isEmpty():
+            parent, new_agent = self._add_queue.popAgent()
+            if self.num_agents < self.max_num_agents:
+                #add agent
+                self.agents.append(new_agent)
+                self.num_agents += 1
+            elif parent not in targets:
+                #substitute random agent
+                index = random.randint(0, len(self.agents)-1)
+                targets.add(self.agents[index])
+                self.agents[index] = new_agent
+            else: #this agent's parent has been replaced
+                #discard this agent
+                del new_agent
+        if targets:
+            for target in targets:
+                del target
+            del targets
 
 
 
 
 
+
+
+
+#-------------------------------------------------------------------------------
 class Model(object):
     pass
 
