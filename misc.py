@@ -10,8 +10,29 @@
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
 
-from base import *
 import heapq
+
+class LineageNode(object):
+    """
+    Keep a log of events over an agent's lifetime.
+
+    """
+    def __init__(self, parent=None):
+        self.parent = parent
+        self.lchild = None
+        self.rchild = None
+        self.log = []
+
+    def record(self, time_stamp, channel_id, state):
+        self.log.append( (time_stamp, channel_id) ) #TODO: log state values
+
+    def split(self):
+        l_node = LineageNode(parent=self)
+        self.lchild = l_node
+        r_node = LineageNode(parent=self)
+        self.rchild = r_node
+        return l_node, r_node
+
 
 class AgentQueue(object):
     """
@@ -24,8 +45,8 @@ class AgentQueue(object):
     def __init__(self):
         self.heap = []
 
-    def addAgent(self, parent, child):
-        heapq.heappush(self.heap, (parent._engine.clock, parent, child))
+    def addAgent(self, parent, child, div_time):
+        heapq.heappush(self.heap, (div_time, parent, child))
 
     def popAgent(self):
         div_time, parent, child = heapq.heappop(self.heap)
@@ -252,60 +273,6 @@ def main():
     print()
 
 
-import math
-import random
-
-class GillespieChannel(AgentChannel):
-    """ Performs Gillespie SSA """
-    def __init__(self, propensity_fcn, stoich_list):
-        self.propensity_fcn = propensity_fcn
-        self.stoich_list = stoich_list
-        self.tau = None
-        self.mu = None
-
-    def scheduleEvent(self, cell, gdata, time, source):
-        a = self.propensity_fcn(cell.state.x, gdata.state)
-        a0 = sum(a)
-        self.tau = -math.log(random.uniform(0,1))/a0
-        s = a[0]
-        self.mu = 0
-        r0 = random.uniform(0,1)*a0
-        while s <= r0:
-            self.mu += 1
-            s += a[self.mu]
-        return time + self.tau
-
-    def fireEvent(self, cell, gdata, time, event_time, aq, rq):
-        for i in range(0, len(cell.state.x)):
-            cell.state.x[i] += self.stoich_list[self.mu][i]
-            if cell.state.x < [0, 0]:
-                raise Exception
-        return True
-
-def main2():
-    s = ((1, 0), (0, 1), (-1, 0), (0, -1))
-    prop_fcn = lambda x, p: [ p.kR, p.kP*x[0], p.gR*x[0], p.gP*x[1] ]
-    channel = GillespieChannel(propensity_fcn=prop_fcn, stoich_list=s)
-
-    cell = Agent(State( ('x',) ), None)
-    cell.state.x = [0, 0]
-    gdata = World(State( ('kR','kP','gR','gP') ), None)
-    gdata.state.kR = 0.1
-    gdata.state.kP = 0.1
-    gdata.state.gR = 0.1
-    gdata.state.gP = 0.002
-
-    tstop = 100
-    t = [0.0]
-    x = [tuple(cell.state.x)]
-    while t[-1] < tstop:
-        ev_time = channel.scheduleEvent(cell, gdata, t[-1], None)
-        is_mod = channel.fireEvent(cell, gdata, t[-1], ev_time, [], [])
-        t.append(ev_time)
-        x.append(tuple(cell.state.x))
-    for i in range(len(x)):
-        print(t[i],'\t',x[i])
-
-
+#-------------------------------------------------------------------------------
 if __name__ == '__main__':
     main()
