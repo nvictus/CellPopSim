@@ -1,0 +1,3 @@
+# ignore contents of these folders
+__pycache__/
+data/
