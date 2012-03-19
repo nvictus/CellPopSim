@@ -14,7 +14,8 @@ import heapq
 
 class LineageNode(object):
     """
-    Keep a log of events over an agent's lifetime.
+    Keep a log of events over an agent's lifetime and logs for its progeny. Log
+    nodes are linked to form a binary tree.
 
     """
     def __init__(self, parent=None):
@@ -22,9 +23,11 @@ class LineageNode(object):
         self.lchild = None
         self.rchild = None
         self.log = []
+        self.meta = []
 
     def record(self, time_stamp, channel_id, state):
-        self.log.append( (time_stamp, channel_id) ) #TODO: log state values
+        self.meta.append( [time_stamp, channel_id] )
+        self.log.append( state.getRecord() ) #TODO: log state values
 
     def split(self):
         l_node = LineageNode(parent=self)
@@ -42,15 +45,28 @@ class AgentQueue(object):
         heap (list): binary heap holding parent and child agents
 
     """
+    class Item(object):
+        def __init__(self, div_time, parent, child):
+            self.div_time = div_time
+            self.parent = parent
+            self.child = child
+
+        def __lt__(self, other):
+            return self.div_time < other.div_time
+
     def __init__(self):
+        """
+        Create an empty queue.
+
+        """
         self.heap = []
 
     def addAgent(self, parent, child, div_time):
-        heapq.heappush(self.heap, (div_time, parent, child))
+        heapq.heappush(self.heap, AgentQueue.Item(div_time, parent, child))
 
     def popAgent(self):
-        div_time, parent, child = heapq.heappop(self.heap)
-        return parent, child
+        item = heapq.heappop(self.heap)
+        return item.parent, item.child
 
     def isEmpty(self):
         return len(self.heap) == 0
@@ -65,13 +81,13 @@ class IndexedPriorityQueue(object):
     Gibson and Bruck. J. Phys. Chem. A, Vol. 104, No. 9, 2000.
 
     Priority values and items are stored in a binary MIN-heap, implemented as a
-    python list (array). The constructor builds an initial heap. Entries can be
-    added. Conceptually, entries are pairs of the form [item, value]. Here,
-    the highest priority item is the one with the *smallest* value.
+    python list (heapq module). The constructor builds an initial heap. Entries
+    can be added. Conceptually, entries are pairs of the form [item, value].
+    Here, the highest priority item is the one with the *smallest* value.
 
-    The class does not support popping single entries out, not even the top
-    priority entry. One can update a given entry's priority or replace its item,
-    and one can access the min entry but cannot remove it.
+    The class does not support popping single entries out. One can access the
+    min entry but not remove it, and one can also update an existing entry's
+    priority value or replace the item.
 
     """
 

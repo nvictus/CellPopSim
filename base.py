@@ -14,7 +14,7 @@ from interface import *
 from misc import LineageNode
 from copy import copy, deepcopy
 
-class Error(Exception):
+class SimulationError(Exception):
     """
     Base class for exceptions in this module.
 
@@ -22,7 +22,12 @@ class Error(Exception):
     pass
 
 
-class SchedulingError(Error):
+class SchedulingError(SimulationError):
+    """
+    Raise if an event was scheduled to occur at a time preceding the entity's
+    current clock time.
+
+    """
     def __init__(self, entity, channel, clock_time, sched_time):
         self.entity = entity
         self.channel = channel
@@ -30,26 +35,12 @@ class SchedulingError(Error):
         self.sched_time = sched_time
 
     def __str__(self):
-        return repr(self.clock_time) + ' ' + repr(self.sched_time) + ' ' + repr(self.channel)
-
-class State(object):
-    """
-    Contain the state variables of an entity.
-
-    """
-    def __init__(self, var_names):
-        for var_name in var_names:
-            setattr(self, var_name, None)
-
-    def __copy__(self):
-        var_names = [name for name in self.__dict__]
-        new_state = State(var_names)
-        for name in var_names:
-            setattr(new_state, name, deepcopy(getattr(self, name)))
-        return new_state
+        return repr(self.channel) + ' ' + \
+               'attempted to schedule an event at t=' + repr(self.sched_time) + ', ' + \
+               'but the agent\'s clock is currently at t=' + repr(self.clock_time) + '.'
 
 
-class AgentChannel(object): #IChannel
+class AgentChannel(object): #implements IChannel
     """
     Base class for an agent simulation channel.
 
@@ -63,7 +54,7 @@ class AgentChannel(object): #IChannel
         return False
 
 
-class WorldChannel(object): #IChannel
+class WorldChannel(object): #implements IChannel
     """
     Base class for global simulation channel.
 
@@ -77,7 +68,89 @@ class WorldChannel(object): #IChannel
         return False
 
 
-class Entity(object): #IEngine
+def default_logger(state):
+    return [copy(getattr(state,name)) for name in state._names]
+
+class State(object):
+    """
+    Contain the state variables of an entity.
+
+    """
+    def __init__(self, var_names, logger=default_logger):
+        self._do_record = logger
+        self._names = []
+        for name in var_names:
+            setattr(self, name, None)
+            self._names.append(name)
+
+    def __copy__(self):
+        new_state = State(self._names, self._do_record)
+        for name in self._names:
+            setattr(new_state, name, copy(getattr(self, name)))
+        return new_state
+
+    def getRecord(self):
+        return self._do_record(self)
+
+
+class Scheduler(object):
+    def __init__(self, time, channel_index, gap_channels, dep_graph, l2g_graph=None, g2l_graph=None):
+        self.channels = channel_index
+        self.gap_channels = gap_channels
+        self.dep_graph = dep_graph
+        self.l_to_g_graph = l2g_graph
+        self.g_to_l_graph = g2l_graph
+        self.is_modified = False
+        self.timetable = {channel:time for channel in channel_index.values()}
+
+    def __copy__(self):
+        # make a copy of each simulation channel, mapped from the original
+        map_copied = {channel:copy(channel) for channel in self.timetable}
+
+        # mirror the index of channels
+        channel_index = {name:map_copied[self.channels[name]] for name in self.channels}
+
+        # mirror the list of gap channels
+        gap_channels = [map_copied[gap_channel] for gap_channel in self.gap_channels]
+
+        # mirror the dependency graphs
+        dep_graph = {}
+        for orig_channel in map_copied:
+            dependencies = self.dep_graph[orig_channel]
+            dep_graph[map_copied[orig_channel]] = tuple([map_copied[dependency] for dependency in dependencies])
+        l_to_g = {}
+        for orig_channel in map_copied:
+            dependencies = self.l_to_g_graph[orig_channel]
+            l_to_g[map_copied[orig_channel]] = tuple([dependency for dependency in dependencies])
+        g_to_l = {}
+        for world_channel in self.g_to_l_graph:
+            dependencies = self.g_to_l_graph[world_channel]
+            g_to_l[world_channel] = tuple([map_copied[dependency] for dependency in dependencies])
+
+        # create a new scheduler
+        new_engine = Scheduler(0, channel_index, gap_channels, dep_graph, l_to_g, g_to_l)
+        # copy the event times
+        for channel in self.timetable:
+            new_engine.timetable[map_copied[channel]] = self.timetable[channel]
+
+        return new_engine
+
+
+class Entity(object): #Abstract, extends IScheduler
+    """
+    Base class for agent/world simulation entities.
+    Implements most of the application-side interface.
+
+    """
+    def __init__(self, time, state, engine):
+        self.clock = time
+        self.state = state
+        self.engine = engine
+        self.is_modified = False
+        self._next_channel = None
+        self._next_event_time = None
+        self._enabled = True
+
     def scheduleAllChannels(self, cargo, source=None):
         tmin = float('inf')
         cmin = None
@@ -103,20 +176,13 @@ class Entity(object): #IEngine
             raise SchedulingError(self, last_channel, self.clock, event_time)
         self.engine.timetable[last_channel] = event_time
 
-#    def rescheduleLast(self, cargo, source=None):
-#        last_channel = self._next_channel
-#        event_time = last_channel.scheduleEvent(self, cargo, self.clock, source)
-#        if event_time < self.clock:
-#            raise SchedulingError(self, last_channel, self.clock, event_time)
-#        self.engine.timetable[last_channel] = event_time
-
     def rescheduleDependentChannels(self, cargo, source=None):
         if self.is_modified:
             for dependent in self.engine.dep_graph[self._next_channel]:
-                    event_time = dependent.scheduleEvent(self, cargo, self.clock, source)
-                    if event_time < self.clock:
-                        raise SchedulingError(self, channel, self.clock, event_time)
-                    self.engine.timetable[dependent] = event_time
+                event_time = dependent.scheduleEvent(self, cargo, self.clock, source)
+                if event_time < self.clock:
+                    raise SchedulingError(self, channel, self.clock, event_time)
+                self.engine.timetable[dependent] = event_time
 
     def closeGaps(self, tbarrier, cargo, aq, rq, source=None):
         if self.engine.gap_channels:
@@ -124,8 +190,8 @@ class Entity(object): #IEngine
                 is_mod = channel.fireEvent(self, cargo, self.clock, self.clock, aq, rq)
                 if is_mod:
                     for dependent in self.engine.dep_graph[channel]:
-                        # some of these rescheds may be redundant if the channels
-                        # are gap channels that have yet to fire...
+                        # NOTE:some of these rescheds may be redundant if the dependents
+                        # are gap channels that are still pending to fire...
                         event_time = dependent.scheduleEvent(self, cargo, self.clock, source)
                         if event_time < self.clock:
                             raise SchedulingError(self, depedent, self.clock, event_time)
@@ -140,20 +206,13 @@ class Entity(object): #IEngine
         self._next_event_time = tmin
         return tmin
 
+    next_event_time = property(fget=getNextEventTime)
+
     def rescheduleAux(self, cargo, source):
         raise(NotImplementedError)
 
 
-class World(Entity): #IWorld
-    def __init__(self, time, state, engine):
-        self.clock = time
-        self.state = state
-        self.engine = engine
-        self.is_modified = False
-        self._next_channel = None
-        self._next_event_time = None
-        self._enabled = True
-
+class World(Entity): #implements IWorld and IScheduler
     def start(self):
         self._enabled = True
 
@@ -198,16 +257,7 @@ class World(Entity): #IWorld
             self.engine.timetable[world_channel] = event_time
 
 
-class Agent(Entity): #IAgent
-    def __init__(self, time, state, engine): #channel_index, dep_graph, l_to_g, g_to_l, gap_channels):
-        self.clock = time
-        self.state = state
-        self.engine = engine #EngineImpl(time, channel_index, dep_graph, l_to_g, g_to_l, gap_channels)
-        self.is_modified = False
-        self._next_channel = None
-        self._next_event_time = None
-        self._enabled = True
-
+class Agent(Entity): #implements IAgent and IScheduler
     def start(self):
         self._enabled = True
 
@@ -233,6 +283,14 @@ class Agent(Entity): #IAgent
                     raise SchedulingError(self, dependent, self.clock, event_time)
                 self.timetable[dependent] = event_time
 
+    def clone(self):
+        time = self.clock
+        state = copy(self.state)
+        engine = copy(self.engine)
+        new_agent = Agent(time, state, engine)
+        new_agent._next_channel, new_agent._next_event_time = min(new_agent.engine.timetable.items(), key=lambda x: x[1])
+        return new_agent
+
     def rescheduleAux(self, cargo, world):
         """ Implemented """
         if world.is_modified:
@@ -242,14 +300,6 @@ class Agent(Entity): #IAgent
                 if event_time < self.clock:
                     raise SchedulingError(self, agent_channel, self.clock, event_time)
                 self.engine.timetable[agent_channel] = event_time
-
-    def clone(self):
-        time = self.clock
-        state = copy(self.state)
-        engine = copy(self.engine)
-        new_agent = Agent(time, state, engine)
-        new_agent._next_channel, new_agent._next_event_time = min(new_agent.engine.timetable.items(), key=lambda x: x[1])
-        return new_agent
 
     def rescheduleLastChannel(self, cargo, source=None):
         last_channel = self._next_channel
@@ -268,58 +318,28 @@ class Agent(Entity): #IAgent
 class LineageAgent(Agent):
     def __init__(self, time, state, engine):
         super(LineageAgent, self).__init__(time, state, engine)
-        self.lineage_node = LineageNode()
-        self.lineage_node.record(time, 'init', state)
+        self.node = LineageNode()
 
-    def fireChannel(self):
+    def fireChannel(self, name, cargo, aq, rq):
         super(LineageAgent, self).fireChannel(name, cargo, aq, rq)
-        self.lineage_node.record(self.clock, self._next_channel.name, self.state) #TODO: provide name attribute for channels
+        self.node.record(self.clock, self._next_channel.name, self.state) #TODO: provide name attribute for channels
 
-    def fireNextChannel(self):
-        super(LineageAgent, self).fireNextChannel(name, cargo, aq, rq)
-        self.lineage_node.record(self.clock, self._next_channel.name, self.state)
+    def fireNextChannel(self, cargo, aq, rq):
+        super(LineageAgent, self).fireNextChannel(cargo, aq, rq)
+        self.node.record(self.clock, self._next_channel.name, self.state)
 
     def clone(self):
-        new_agent = super(LineageAgent, self).clone()
-        l_node, r_node = self.lineage_node.split()
-        self.lineage_node = l_node
-        new_agent.lineage_node = r_node
-        new_agent.lineage_node.record(new_agent._next_event_time, new_agent._next_channel.name, new_agent.state)
+        time = self.clock
+        state = copy(self.state)
+        engine = copy(self.engine)
+        new_agent = LineageAgent(time, state, engine)
+        new_agent._next_channel, new_agent._next_event_time = min(new_agent.engine.timetable.items(), key=lambda x: x[1])
+        l_node, r_node = self.node.split()
+        self.node = l_node
+        new_agent.node = r_node
+        new_agent.node.record(new_agent._next_event_time, new_agent._next_channel.name, new_agent.state)
+        return new_agent
 
-class EngineImpl(object):
-    def __init__(self, time, channel_index, gap_channels, dep_graph, l2g_graph=None, g2l_graph=None):
-        self.channels = channel_index
-        self.gap_channels = gap_channels
-        self.dep_graph = dep_graph
-        self.l_to_g_graph = l2g_graph
-        self.g_to_l_graph = g2l_graph
-        self.is_modified = False
-        self.timetable = {channel:time for channel in channel_index.values()}
-
-    def __copy__(self):
-        map_copied = {channel:copy(channel) for channel in self.timetable}
-
-        channel_index = {name:map_copied[self.channels[name]] for name in self.channels}
-        gap_channels = [map_copied[gap_channel] for gap_channel in self.gap_channels]
-        dep_graph = {}
-        for orig_channel in map_copied:
-            dependencies = self.dep_graph[orig_channel]
-            dep_graph[map_copied[orig_channel]] = tuple([map_copied[dependency] for dependency in dependencies])
-        l_to_g = {}
-        for orig_channel in map_copied:
-            dependencies = self.l_to_g_graph[orig_channel]
-            l_to_g[map_copied[orig_channel]] = tuple([dependency for dependency in dependencies])
-        g_to_l = {}
-        for world_channel in self.g_to_l_graph:
-            dependencies = self.g_to_l_graph[world_channel]
-            g_to_l[world_channel] = tuple([map_copied[dependency] for dependency in dependencies])
-
-        new_engine = EngineImpl(0, channel_index, gap_channels, dep_graph, l_to_g, g_to_l)
-        for channel in self.timetable:
-            new_engine.timetable[map_copied[channel]] = self.timetable[channel]
-        # child engine needs to know what channel triggered its creation...for rescheduling later
-        #new_engine._next_channel = map_copied[self._next_channel]
-        return new_engine
 
 
 
@@ -331,9 +351,9 @@ class EngineImpl(object):
 
 #-------------------------------------------------------------------------------
 def main():
-    s = State(['a','b','c'])
-
-    print()
+    #s = State(['a','b','c'])
+    s = SchedulingError(None, AgentChannel(), 10.0, 8.5)
+    print(s)
 
 if __name__ == '__main__':
     main()
