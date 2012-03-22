@@ -12,6 +12,18 @@
 
 import heapq
 
+def preorder_traversal(node, adj_list=[]):
+    """
+    Returns the adjacency list (i.e., list of all [parent, child] pairs)
+    for node and all its descendants in preorder sequence.
+
+    """
+    if node is not None:
+        adj_list.append([node.parent, node])
+        preorder_traversal(node.lchild, adj_list)
+        preorder_traversal(node.rchild, adj_list)
+    return adj_list
+
 class LineageNode(object):
     """
     Keep a log of events over an agent's lifetime and logs for its progeny. Log
@@ -22,12 +34,14 @@ class LineageNode(object):
         self.parent = parent
         self.lchild = None
         self.rchild = None
+        self.tstamp = []
+        self.estamp = []
         self.log = []
-        self.meta = []
 
     def record(self, time_stamp, channel_id, state):
-        self.meta.append( [time_stamp, channel_id] )
-        self.log.append( state.getRecord() ) #TODO: log state values
+        self.tstamp.append( time_stamp )
+        self.estamp.append( channel_id )
+        self.log.append( state.getRecord() )
 
     def split(self):
         l_node = LineageNode(parent=self)
@@ -35,6 +49,10 @@ class LineageNode(object):
         r_node = LineageNode(parent=self)
         self.rchild = r_node
         return l_node, r_node
+
+    def traverse(self, order='preorder'):
+        # TODO: add other traversal methods/non-recursive implementations
+        return preorder_traversal(self)
 
 
 class AgentQueue(object):
@@ -66,6 +84,7 @@ class AgentQueue(object):
 
     def popAgent(self):
         item = heapq.heappop(self.heap)
+        item.child.completeLastEvent(item.parent)
         return item.parent, item.child
 
     def isEmpty(self):

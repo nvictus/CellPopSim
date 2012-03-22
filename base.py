@@ -198,15 +198,15 @@ class Entity(object): #Abstract, extends IScheduler
                         self.engine.timetable[dependent] = event_time
         self.clock = tbarrier
 
-    def getNextEventTime(self):
-        """ TODO: make this a dependent, read-only property """
+    def _getNextEventTime(self):
+        """ getter for dependent, read-only property """
         # NOTE:need to compare tmin with ALL channels... or use ipq
         cmin, tmin = min(self.engine.timetable.items(), key=lambda x: x[1])
         self._next_channel = cmin
         self._next_event_time = tmin
         return tmin
 
-    next_event_time = property(fget=getNextEventTime)
+    next_event_time = property(fget=_getNextEventTime)
 
     def rescheduleAux(self, cargo, source):
         raise(NotImplementedError)
@@ -239,7 +239,12 @@ class World(Entity): #implements IWorld and IScheduler
                 self.timetable[dependent] = event_time
 
     def rescheduleAux(self, cargo, source_agent):
-        """ Implemented """
+        """
+        Implemented IScheduler interface method.
+        Takes as input the agent for fired the offending event.
+        Reschedules affected world channels.
+
+        """
         if source_agent.is_modified:
             last_channel = source_agent._next_channel
             for world_channel in source_agent.engine.l_to_g_graph[last_channel]:
@@ -249,7 +254,12 @@ class World(Entity): #implements IWorld and IScheduler
                 self.engine.timetable[world_channel] = event_time
 
     def rescheduleAuxAsync(self, cargo, world_channels):
-        """ Need a different implementation for asynchronous method """
+        """
+        Different version of rescheduleAux for the Asynchronous Method algorithm.
+        This takes the collection of world channels to reschedule as input
+        rather than the agents who fired the offending events.
+
+         """
         for world_channel in world_channels:
             event_time = world_channel.scheduleEvent(self, cargo, self.clock, source_agent)
             if event_time < self.clock:
@@ -292,7 +302,10 @@ class Agent(Entity): #implements IAgent and IScheduler
         return new_agent
 
     def rescheduleAux(self, cargo, world):
-        """ Implemented """
+        """
+        Implemented IScheduler interface method.
+
+        """
         if world.is_modified:
             last_channel = world._next_channel
             for agent_channel in self.engine.g_to_l_graph[last_channel]:
@@ -301,7 +314,13 @@ class Agent(Entity): #implements IAgent and IScheduler
                     raise SchedulingError(self, agent_channel, self.clock, event_time)
                 self.engine.timetable[agent_channel] = event_time
 
+    def completeLastEvent(self, parent):
+        self.clock = parent._next_event_time
+        self.is_modified = parent.is_modified
+
     def rescheduleLastChannel(self, cargo, source=None):
+        #TODO: include the parent agent as input and update clock and
+        #      is_modified attributes to the parent agent... then call this from agentqueue pop method
         last_channel = self._next_channel
         event_time = last_channel.scheduleEvent(self, cargo, self.clock, source)
         if event_time < self.clock:
@@ -322,29 +341,109 @@ class LineageAgent(Agent):
 
     def fireChannel(self, name, cargo, aq, rq):
         super(LineageAgent, self).fireChannel(name, cargo, aq, rq)
-        self.node.record(self.clock, self._next_channel.name, self.state) #TODO: provide name attribute for channels
+        self.node.record(self.clock, self._next_channel.id, self.state) #TODO: provide id attribute for channels
 
     def fireNextChannel(self, cargo, aq, rq):
         super(LineageAgent, self).fireNextChannel(cargo, aq, rq)
-        self.node.record(self.clock, self._next_channel.name, self.state)
+        # NOTE: For a division event, the final state gets logged as the
+        #       first event of the left child node (the new self node)...
+        #       We should supplement this by recording the final state of the
+        #       right newborn cell to the right child node (see completeLastEvent)
+        self.node.record(self.clock, self._next_channel.id, self.state)
+
+    def completeLastEvent(self, parent_agent):
+        self.clock = parent_agent._next_event_time
+        self.is_modified = parent_agent.is_modified
+        # log the event that caused division, recording final state of the newborn
+        self.node.record(self.clock, self._next_channel.id, self.state)
 
     def clone(self):
         time = self.clock
         state = copy(self.state)
         engine = copy(self.engine)
-        new_agent = LineageAgent(time, state, engine)
-        new_agent._next_channel, new_agent._next_event_time = min(new_agent.engine.timetable.items(), key=lambda x: x[1])
+
+        # make new agent, mirror the next-event info of the parent agent
+        other = LineageAgent(time, state, engine)
+        other._next_channel, other._next_event_time = min(other.engine.timetable.items(), key=lambda x: x[1])
+
+        # branch into two new nodes
         l_node, r_node = self.node.split()
+
         self.node = l_node
-        new_agent.node = r_node
-        new_agent.node.record(new_agent._next_event_time, new_agent._next_channel.name, new_agent.state)
-        return new_agent
+        other.node = r_node
+        return other
+
+
+class RecordingChannel(WorldChannel):
+    """ Global channel that records population snapshots """
+    def __init__(self, tstep, recorder=None):
+        self.tstep = tstep
+        self.count = 0
+        if recorder is None:
+            raise(SimulationError)
+        else:
+            self.recorder = recorder
+
+    def scheduleEvent(self, gdata, cells, time, src):
+        return time + self.tstep
+
+    def fireEvent(self, gdata, cells, time, event_time, aq, rq):
+        self.recorder.snapshot(gdata, cells, event_time)
+        self.count += 1
+        return False
+
+    def getRecorder(self):
+        return self.recorder
 
 
 
+import numpy as np
+import h5py
 
+def save_snapshot(filename, simdata):
+    try:
+        dfile = h5py.File(filename, 'w') #'data/stress_data.hdf5'
+        dfile.create_dataset(name='time',
+                             data=np.array(simdata.t))
+        for dname in simdata.datasets:
+            dfile.create_dataset(name=dname,
+                                 data=np.array(getattr(simdata, dname)))
+    finally:
+        dfile.close()
 
+def save_lineage(filename, root, var_names):
+    node_list = root.traverse()
+    tstamp = []
+    estamp = []
+    data = []
+    adj_list = []
+    row = 0
+    for parent, child in node_list:
+        pid = id(parent) if parent is not None else 0
+        cid = id(child)
+        tstamp.extend(child.tstamp)
+        estamp.extend(child.estamp)
+        data.extend(child.log)
+        adj_list.append([pid, cid, row, len(child.log)])
+        row += len(child.log)
 
+    try:
+        dfile = h5py.File(filename,'w')
+        dfile.create_dataset(name='adj_list_info',
+                             data=np.array(['parent_id', 'id', 'start_row', 'num_events'], dtype=np.bytes_))
+        dfile.create_dataset(name='adj_list',
+                             data=np.array(adj_list))
+
+        dfile.create_dataset(name='timestamp',
+                             data=np.array(tstamp))
+        dfile.create_dataset(name='eventstamp',
+                             data=np.array(estamp, dtype=np.bytes_))
+        dfile.create_dataset(name='node_data_info',
+                             data=np.array(var_names, dtype=np.bytes_))
+        dfile.create_dataset(name='node_data',
+                             data=np.array(data))
+    finally:
+        dfile.close()
 
 
 

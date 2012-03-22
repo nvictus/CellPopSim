@@ -10,7 +10,7 @@
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
 
-from base import AgentChannel, WorldChannel, RecordingChannel
+from base import AgentChannel, WorldChannel, RecordingChannel, save_lineage, save_snapshot
 import random
 import math
 from copy import copy
@@ -106,6 +106,9 @@ class DivisionChannel(AgentChannel):
         num_tails = n - num_heads
         return num_heads, num_tails
 
+
+
+
 def main():
     s = (( 1, 0 ),
          ( 0, 1 ),
@@ -117,16 +120,6 @@ def main():
                  p['kP']*x[0],
                  p['gR']*x[0],
                  p['gP']*x[1] ]
-
-    rc = RecordingChannel(50, recorder=SVDModelRecorder())
-    gc = GillespieChannel(prop_fcn, s)
-    vc = VolumeChannel(5)
-    dc = DivisionChannel(0.5)
-
-    rc.name = 'RecordingChannel'
-    gc.name = 'GillespieChannel'
-    vc.name = 'VolumeChannel'
-    dc.name = 'DivisionChannel'
 
     def initialize(cells, gdata, p):
         # initialize simulation entities
@@ -144,6 +137,12 @@ def main():
     def my_logger(state):
         return [state.x[0],state.x[1],state.v]
 
+
+    rc = RecordingChannel(50, recorder=SVDModelRecorder())
+    gc = GillespieChannel(prop_fcn, s)
+    vc = VolumeChannel(5)
+    dc = DivisionChannel(0.5)
+
     model = Model(init_num_agents=2,
                   max_num_agents=100,
                   world_vars=('p'),
@@ -154,30 +153,27 @@ def main():
                   parameters=[])
 
     model.addWorldChannel(channel=rc,
-                          name='W1',
+                          name='RecordingChannel',
                           is_gap=False,
                           ac_dependents=[],
                           wc_dependents=[])
     model.addAgentChannel(channel=gc,
-                          name='A1',
+                          name='GillespieChannel',
                           is_gap=False,
                           ac_dependents=[],
                           wc_dependents=[])
     model.addAgentChannel(channel=vc,
-                          name='A2',
+                          name='VolumeChannel',
                           is_gap=True,
                           ac_dependents=[],
                           wc_dependents=[])
     model.addAgentChannel(channel=dc,
-                          name='A3',
+                          name='DivisionChannel',
                           is_gap=False,
                           ac_dependents=[gc,vc],
                           wc_dependents=[])
 
-    mgr = AsyncMethodManager(model, 0)
-
-
-
+    mgr = AsyncMethodManager(model, 0) #FEMethodManager(model, 0)
 
     t0 = time.time()
     mgr.runSimulation(10000)
@@ -187,47 +183,10 @@ def main():
     sd = rc.getRecorder()
     root = mgr.root_nodes[0]
 
-    # record lineage data...
-    def traverse(node, adj_list=[]):
-        if node is not None:
-            adj_list.append([node.parent, node])
-            traverse(node.lchild, adj_list)
-            traverse(node.rchild, adj_list)
-        return adj_list
+    #save_snapshot('data/svd_data.hdf5',sd)
+    save_lineage('data/svd_lineage.hdf5', root, ['x0','x1','v'])
 
-    node_list = traverse(root)
-    data = []
-    ts = []
-    es = []
-    adj_list = []
-    row = 0
-    for parent, child in node_list:
-        ts.extend([meta[0] for meta in child.meta])
-        es.extend([meta[1] for meta in child.meta])
-        data.extend(child.log)
-        pid = id(parent) if parent is not None else 0
-        cid = id(child)
-        adj_list.append([pid, cid, row, len(child.log)])
-        row += len(child.log)
 
-    try:
-        dfile = h5py.File('data/lineage.hdf5','w')
-        dfile.create_dataset(name='adj_list_info',
-                             data=np.array(['parent_id', 'id', 'start_row', 'num_events'], dtype=np.bytes_))
-        dfile.create_dataset(name='adj_list',
-                             data=np.array(adj_list))
-
-        dfile.create_dataset(name='node_data_info',
-                             data=np.array(['x1','x2','v'], dtype=np.bytes_))
-        dfile.create_dataset(name='node_data',
-                             data=np.array(data))
-
-        dfile.create_dataset(name='timestamp',
-                             data=np.array(ts))
-        dfile.create_dataset(name='eventstamp',
-                             data=np.array(es, dtype=np.bytes_))
-    finally:
-        dfile.close()
 
 
 #-------------------------------------------------------------------------------

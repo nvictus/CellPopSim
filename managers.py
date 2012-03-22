@@ -36,6 +36,7 @@ class Model(object):
     # Store simulation channel information in a table of entries according to
     class ChannelEntry(object):
         def __init__(self, channel, name, is_gap, wc_dependents=None, ac_dependents=None):
+            channel.id = name
             self.name = name
             self.channel = channel
             self.is_gap = is_gap
@@ -276,13 +277,13 @@ class FEMethodManager(AbstractManager):
                 # synchronize agents with the world (fire gap channels)
                 for agent in agents:
                     agent.closeGaps(tmin, world, aq, rq)
-                    self.timetable.update(agent, agent.getNextEventTime())
+                    self.timetable.update(agent, agent.next_event_time)
 
                 # next world event
                 world.fireNextChannel(agents, aq, rq)
                 world.rescheduleDependentChannels(agents)
                 world.closeGaps(tmin, agents, aq, rq)
-                self.timetable.update(world, world.getNextEventTime())
+                self.timetable.update(world, world.next_event_time)
                 if not world._enabled: # terminate simulation prematurely
                     return
 
@@ -290,18 +291,18 @@ class FEMethodManager(AbstractManager):
                 if world.is_modified:
                     for agent in agents:
                         agent.rescheduleAux(world, world)
-                        self.timetable.update(agent, agent.getNextEventTime())
+                        self.timetable.update(agent, agent.next_event_time)
 
             elif emin._enabled:      #(emin is an agent)
                 # next agent event
                 emin.fireNextChannel(world, aq, rq)
                 emin.rescheduleDependentChannels(world)
-                self.timetable.update(emin, emin.getNextEventTime())
+                self.timetable.update(emin, emin.next_event_time())
 
                 # reschedule world channels affected by agent event
                 if emin.is_modified:
                     world.rescheduleAux(agents, emin)
-                    self.timetable.update(world, world.getNextEventTime())
+                    self.timetable.update(world, world.next_event_time)
 
              # add/substitute new agents
             self._processAgentQueues(tmin)
@@ -314,9 +315,7 @@ class FEMethodManager(AbstractManager):
         while not self._add_queue.isEmpty():
             parent, new_agent = self._add_queue.popAgent()
 
-            # Update child agent's engine to mirror parent's
-            new_agent.clock = parent.clock
-            new_agent.is_modified = parent.is_modified
+            # Update child agent's schedule to mirror parent's
             new_agent.rescheduleLastChannel(self.world)
             new_agent.rescheduleDependentChannels(self.world)
             #no need to fire gap channels!
@@ -326,7 +325,7 @@ class FEMethodManager(AbstractManager):
                 # add to manager
                 self.agents.append(new_agent)
                 # add to ipq
-                self.timetable.add(new_agent, new_agent.getNextEventTime())
+                self.timetable.add(new_agent, new_agent.next_event_time)
                 self.num_agents += 1
             else:
                 index = random.randint(0, len(self.agents)-1)
@@ -334,7 +333,7 @@ class FEMethodManager(AbstractManager):
                 # substitute in manager
                 self.agents[index] = new_agent
                 # substitute in ipq
-                self.timetable.replace(target_agent, new_agent, new_agent.getNextEventTime())
+                self.timetable.replace(target_agent, new_agent, new_agent.next_event_time)
                 del target_agent
 
 
@@ -375,13 +374,13 @@ class AsyncMethodManager(AbstractManager):
         agents = self.agents
         world = self.world
 
-        tsync = world.getNextEventTime()
+        tsync = world.next_event_time
 
         while (tsync <= tstop):
             # release agents to sync time barrier
             pending_world_channels = set()
             for agent in agents:
-                    clock = agent.getNextEventTime()
+                    clock = agent.next_event_time
                     while agent._enabled and clock <= tsync:
                         agent.fireNextChannel(world, aq, rq)
 
@@ -392,7 +391,7 @@ class AsyncMethodManager(AbstractManager):
                                 pending_world_channels.add(wc)
 
                         agent.rescheduleDependentChannels(world)
-                        clock = agent.getNextEventTime()
+                        clock = agent.next_event_time
                     agent.closeGaps(tsync, world, aq, rq)
 
             # add/substitute new agents
@@ -412,32 +411,37 @@ class AsyncMethodManager(AbstractManager):
                     agent.rescheduleAux(world, world)
 
             # next sync barrier
-            tsync = world.getNextEventTime()
+            tsync = world.next_event_time
 
     def _processAgentQueues(self, tsync):
         targets = set()
         while not self._add_queue.isEmpty():
             parent, new_agent = self._add_queue.popAgent()
 
-            # Update child agent's engine to mirror parent's
-            new_agent.clock = parent.clock
-            new_agent.is_modified = parent.is_modified
-            new_agent.rescheduleLastChannel(self.world)
-            new_agent.rescheduleDependentChannels(self.world)
-            new_agent.closeGaps(tsync, self.world, self._add_queue, self._rem_queue)
-
             # Add or substitute new agent
             if self.num_agents < self.max_num_agents:
-                #add agent
+                # Update child agent's event schedule to mirror parent's
+                new_agent.rescheduleLastChannel(self.world)
+                new_agent.rescheduleDependentChannels(self.world)
+                new_agent.closeGaps(tsync, self.world, self._add_queue, self._rem_queue)
+
+                # Add agent
                 self.agents.append(new_agent)
                 self.num_agents += 1
             elif parent not in targets:
-                #replace a randomly chosen agent
+                # Update child agent's event schedule to mirror parent's
+                new_agent.rescheduleLastChannel(self.world)
+                new_agent.rescheduleDependentChannels(self.world)
+                new_agent.closeGaps(tsync, self.world, self._add_queue, self._rem_queue)
+
+                # Replace a randomly chosen agent
                 index = random.randint(0, len(self.agents)-1)
                 targets.add(self.agents[index])
                 self.agents[index] = new_agent
-            else:      #(this agent's parent has been replaced by another agent)
-                del new_agent #discard this agent
+            else:
+                # This agent's parent has been replaced by another agent
+                # --> discard this agent
+                del new_agent
 
         if targets:
             for target in targets:
