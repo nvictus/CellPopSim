@@ -61,6 +61,7 @@ class GillespieChannel(AgentChannel):
         return time + self.tau
 
     def fireEvent(self, cell, gdata, time, event_time, aq, rq):
+        cell.fireChannel('VolumeChannel', gdata, aq, rq)
         for i in range(0, len(cell.state.x)):
             cell.state.x[i] += self.stoich_list[self.mu][i]
         return True
@@ -74,8 +75,7 @@ class VolumeChannel(AgentChannel):
         return time + self.tstep
 
     def fireEvent(self, cell, gdata, time, event_time, aq, rq):
-        cell.state.v *= math.exp(gdata.state.p['kV']*(event_time-cell.state.t_last))
-        cell.state.t_last = event_time
+        cell.state.v *= math.exp(gdata.state.p['kV']*(event_time-time))
         return True
 
 class DivisionChannel(AgentChannel):
@@ -87,13 +87,12 @@ class DivisionChannel(AgentChannel):
         return time + math.log(cell.state.v_thresh/cell.state.v)/gdata.state.p['kV']
 
     def fireEvent(self, cell, gdata, time, event_time, aq, rq):
+        cell.fireChannel('VolumeChannel', gdata, aq, rq)
         new_cell = cell.clone()
         v_mother = cell.state.v
         cell.state.v, new_cell.state.v = self.prob*v_mother, (1-self.prob)*v_mother
-        cell.state.v_thresh = 2 + random.normalvariate(0, 0.05)
-        new_cell.state.v_thresh = 2 + random.normalvariate(0, 0.05)
-        cell.state.t_last = event_time
-        new_cell.state.t_last = event_time
+        cell.state.v_thresh = 2 + random.normalvariate(0, 0.15)
+        new_cell.state.v_thresh = 2 + random.normalvariate(0, 0.15)
         x_mother = cell.state.x[:]
         cell.state.x[0], new_cell.state.x[0] = self._binomialPartition(x_mother[0])
         cell.state.x[1], new_cell.state.x[1] = self._binomialPartition(x_mother[1])

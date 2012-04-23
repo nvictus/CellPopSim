@@ -178,46 +178,6 @@ class AbstractManager(object):
     def runSimulation(self, tstop):
         raise(NotImplementedError)
 
-    def _createWorld(self, t_init, var_names, wc_table):
-        # First, create state and scheduler
-        # Return: world entity
-        channel_index = {}
-        dep_graph = {}
-        gap_channels = []
-        for entry in wc_table:
-            channel_index[entry.name] = entry.channel
-            dep_graph[entry.channel] = tuple([channel for channel in entry.wc_dependents])
-            if entry.is_gap:
-                gap_channels.append(entry.channel)
-        state = State(var_names)
-        engine = Scheduler(t_init, channel_index, gap_channels, dep_graph)
-        return World(t_init, state, engine)
-
-    def _createAgents(self, num_agents, t_init, var_names, logger, ac_table, wc_table):
-        # First, create state and scheduler
-        # Return: list of agent entities
-        agents = []
-        for i in range(num_agents):
-            channel_index = {}
-            dep_graph = {}
-            l2g_graph = {}
-            g2l_graph = {}
-            gap_channels = []
-            map_copied = {entry.channel:copy(entry.channel) for entry in ac_table}
-            for entry in ac_table:
-                channel_index[entry.name] = map_copied[entry.channel]
-                dep_graph[map_copied[entry.channel]] = tuple([map_copied[channel] for channel in entry.ac_dependents])
-                l2g_graph[map_copied[entry.channel]] = entry.wc_dependents
-                if entry.is_gap:
-                    gap_channels.append(map_copied[entry.channel])
-            for entry in wc_table:
-                g2l_graph[entry.channel] = tuple([map_copied[channel] for channel in entry.ac_dependents])
-
-            state = State(var_names, logger)
-            engine = Scheduler(t_init, channel_index, gap_channels, dep_graph, l2g_graph, g2l_graph)
-            agents.append(Agent(t_init, state, engine))
-        return agents
-
 
 class FEMethodManager(AbstractManager):
     def __init__(self, model, tstart):
@@ -238,10 +198,10 @@ class FEMethodManager(AbstractManager):
         self.initialize(model)
 
         # set up global timetable
-        event_times = [self.world.getNextEventTime()]
+        event_times = [self.world.next_event_time]
         entities = [self.world]
         for agent in self.agents:
-            event_times.append(agent.getNextEventTime())
+            event_times.append(agent.next_event_time)
             entities.append(agent)
         self.timetable = IndexedPriorityQueue(entities, event_times)
 
@@ -316,7 +276,9 @@ class FEMethodManager(AbstractManager):
             parent, new_agent = self._add_queue.popAgent()
 
             # Update child agent's schedule to mirror parent's
-            new_agent.rescheduleLastChannel(self.world)
+            # finalize the event added this agent to the queue
+            new_agent.finalizePrevEvent(parent)
+            new_agent.reschedulePrevChannel(self.world)
             new_agent.rescheduleDependentChannels(self.world)
             #no need to fire gap channels!
 
@@ -421,7 +383,8 @@ class AsyncMethodManager(AbstractManager):
             # Add or substitute new agent
             if self.num_agents < self.max_num_agents:
                 # Update child agent's event schedule to mirror parent's
-                new_agent.rescheduleLastChannel(self.world)
+                new_agent.finalizePrevEvent(parent)
+                new_agent.reschedulePrevChannel(self.world)
                 new_agent.rescheduleDependentChannels(self.world)
                 new_agent.closeGaps(tsync, self.world, self._add_queue, self._rem_queue)
 
@@ -430,7 +393,8 @@ class AsyncMethodManager(AbstractManager):
                 self.num_agents += 1
             elif parent not in targets:
                 # Update child agent's event schedule to mirror parent's
-                new_agent.rescheduleLastChannel(self.world)
+                new_agent.finalizePrevEvent(parent)
+                new_agent.reschedulePrevChannel(self.world)
                 new_agent.rescheduleDependentChannels(self.world)
                 new_agent.closeGaps(tsync, self.world, self._add_queue, self._rem_queue)
 

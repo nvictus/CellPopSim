@@ -9,6 +9,13 @@
 # Licence:     <your licence>
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
+"""
+Interface classes for main components of the simulation framework. These
+interfaces only serve as documentation since they cannot actually be
+enforced.
+
+"""
+
 
 class IChannel(object):
     """
@@ -21,7 +28,7 @@ class IChannel(object):
         Return the putative time of the next event.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def fireEvent(self, entity, cargo, time, event_time, add_queue, rem_queue):
         """
@@ -29,7 +36,7 @@ class IChannel(object):
         Return True if the state of the entity was modified, else False.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
 
 class IWorld(object):
@@ -45,21 +52,21 @@ class IWorld(object):
         The simulation clock is not advanced.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def start(self):
         """
         Promote the entity into the event loop.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def stop(self):
         """
         Remove the entity from the event loop.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
 
 class IAgent(object):
@@ -75,28 +82,28 @@ class IAgent(object):
         The simulation clock is not advanced.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def start(self):
         """
         Promote the agent into the event loop.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def stop(self):
         """
         Remove the agent from the event loop.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def clone(self):
         """
         Make a new agent that is a copy of the current one.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
 
 class IScheduler(object):
@@ -110,7 +117,7 @@ class IScheduler(object):
         Schedule every simulation channel and store event times in a timetable.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def fireNextChannel(self, cargo, aq, rq):
         """
@@ -119,14 +126,14 @@ class IScheduler(object):
         Reschedule the channel.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def rescheduleDependentChannels(self, cargo, source):
         """
         Reschedule channels that depend on the previously fired channel.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def closeGaps(self, cargo, aq, rq, source, tbarrier):
         """
@@ -135,7 +142,7 @@ class IScheduler(object):
         Advance clock to tbarrier.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def rescheduleAux(self, cargo, source):
         """
@@ -143,11 +150,11 @@ class IScheduler(object):
         foreign entity 'source'.
 
         """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
     def getNextEventTime(self):
         """ TODO: make this a dependent, read-only property """
-        raise(NotImplementedError)
+        raise NotImplementedError
 
 
 class IRecorder(object):
@@ -156,4 +163,4 @@ class IRecorder(object):
 
     """
     def snapshot(self, time, agents, world, itr):
-        raise(NotImplementedError)
+        raise NotImplementedError

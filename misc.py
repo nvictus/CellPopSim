@@ -12,19 +12,29 @@
 
 import heapq
 
-def preorder_traversal(node, adj_list=[]):
+def traversal(node, order=-1, adj_list=[]):
     """
-    Returns the adjacency list (i.e., list of all [parent, child] pairs)
-    for node and all its descendants in preorder sequence.
+    Returns an adjacency list (sequence of all [parent, child] pairs) for a root
+    tree node and all its descendants in a topological ordering of the nodes.
+        order == -1 : preorder traversal
+        order ==  0 : inorder traversal
+        order ==  1 : postorder traversal
 
     """
     if node is not None:
-        adj_list.append([node.parent, node])
-        preorder_traversal(node.lchild, adj_list)
-        preorder_traversal(node.rchild, adj_list)
+        if order == -1:
+            adj_list.append([node.parent, node])
+        traversal(node.lchild, order, adj_list)
+
+        if order == 0:
+            adj_list.append([node.parent, node])
+        traversal(node.rchild, order, adj_list)
+
+        if order == 1:
+            adj_list.append([node.parent, node])
     return adj_list
 
-class LineageNode(object):
+class DataLogNode(object): #TODO: rename class LogNode
     """
     Keep a log of events over an agent's lifetime and logs for its progeny. Log
     nodes are linked to form a binary tree.
@@ -41,18 +51,18 @@ class LineageNode(object):
     def record(self, time_stamp, channel_id, state):
         self.tstamp.append( time_stamp )
         self.estamp.append( channel_id )
-        self.log.append( state.getRecord() )
+        self.log.append( state.snapshot() )
 
-    def split(self):
-        l_node = LineageNode(parent=self)
+    def branch(self): #TODO: rename as branch
+        l_node = DataLogNode(parent=self)
         self.lchild = l_node
-        r_node = LineageNode(parent=self)
+        r_node = DataLogNode(parent=self)
         self.rchild = r_node
         return l_node, r_node
 
-    def traverse(self, order='preorder'):
+    def traverse(self, order=-1):
         # TODO: add other traversal methods/non-recursive implementations
-        return preorder_traversal(self)
+        return traversal(self, -1)
 
 
 class AgentQueue(object):
@@ -80,11 +90,11 @@ class AgentQueue(object):
         self.heap = []
 
     def addAgent(self, parent, child, div_time):
+        # TODO: if parent == child, throw error...
         heapq.heappush(self.heap, AgentQueue.Item(div_time, parent, child))
 
     def popAgent(self):
         item = heapq.heappop(self.heap)
-        item.child.completeLastEvent(item.parent)
         return item.parent, item.child
 
     def isEmpty(self):
@@ -101,15 +111,14 @@ class IndexedPriorityQueue(object):
 
     Priority values and items are stored in a binary MIN-heap, implemented as a
     python list (heapq module). The constructor builds an initial heap. Entries
-    can be added. Conceptually, entries are pairs of the form [item, value].
-    Here, the highest priority item is the one with the *smallest* value.
+    can be added. Conceptually, entries are pairs of the form [item, key].
+    Here, the highest priority item is the one with the *smallest* key.
 
     The class does not support popping single entries out. One can access the
     min entry but not remove it, and one can also update an existing entry's
-    priority value or replace the item.
+    priority key or replace the item.
 
     """
-
     class Entry(object):
         def __init__(self, item, value):
             self.item = item
