@@ -4,120 +4,14 @@
 #
 # Author:      Nezar
 #
-# Created:     11/01/2012
+# Created:     23/04/2012
 # Copyright:   (c) Nezar 2012
 # Licence:     <your licence>
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
-
-from base import *
+from event import Agent, LineageAgent, World, create_agent, create_world
 from misc import *
 import random
-
-
-class Model(object):
-    """
-    Specify an agent-based model.
-    The Model constructor requires the following:
-        init_num_agents (int): the initial number of agents to create
-        max_num_agents (int): the maximum number of agents allowed
-        init_fcn (function): an user-defined function to initialize the states
-                             of the entities
-        parameters (any): user data to pass to the initialization function
-        world_vars (list-of-string): names of global state variables
-        agent_vars (list-of-string): names of local state variables
-
-    The last thing to be added is simulation channels. These require information
-    including a qualified name and global and local dependencies.
-        addWorldChannel() to add a world channel
-        addAgentChannel() to add an agent channel
-
-    """
-    # Store simulation channel information in a table of entries according to
-    class ChannelEntry(object):
-        def __init__(self, channel, name, is_gap, wc_dependents=None, ac_dependents=None):
-            channel.id = name
-            self.name = name
-            self.channel = channel
-            self.is_gap = is_gap
-            self.ac_dependents = ac_dependents if ac_dependents is not None else []
-            self.wc_dependents = wc_dependents if wc_dependents is not None else []
-
-    def __init__(self, init_num_agents,
-                       max_num_agents,
-                       world_vars,
-                       agent_vars,
-                       init_fcn,
-                       parameters,
-                       logger=None,
-                       track_lineage=[]):
-        self.init_num_agents = init_num_agents
-        self.max_num_agents = max_num_agents
-        self.init_fcn = init_fcn
-        self.parameters = parameters
-        self.world_vars = world_vars
-        self.agent_vars = agent_vars
-        self.logger = logger
-        self.track_lineage = track_lineage
-        self.world_channel_table = []
-        self.agent_channel_table = []
-
-    def addWorldChannel(self, **kwargs):
-        self.world_channel_table.append(Model.ChannelEntry(**kwargs))
-
-    def addAgentChannel(self, **kwargs):
-        self.agent_channel_table.append(Model.ChannelEntry(**kwargs))
-
-
-def createAgent(agent_class, t_init, ac_table, wc_table, var_names, logger):
-    """ Factory for agent objects. """
-    # make copy of each channel instance provided
-    copied = {entry.channel:copy(entry.channel) for entry in ac_table}
-
-    # build channel dependency graphs and lookup table for scheduler
-    channel_index = {}
-    dep_graph = {}
-    l2g_graph = {}
-    gap_channels = []
-    for entry in ac_table:
-        channel_index[entry.name] = copied[entry.channel]
-        dep_graph[copied[entry.channel]] = tuple([copied[channel] for channel in entry.ac_dependents])
-        l2g_graph[copied[entry.channel]] = entry.wc_dependents
-        if entry.is_gap:
-            gap_channels.append(copied[entry.channel])
-    g2l_graph = {}
-    for entry in wc_table:
-        g2l_graph[entry.channel] = tuple([copied[channel] for channel in entry.wc_dependents])
-
-    # create state object
-    if logger is not None:
-        state = State(var_names, logger)
-    else:
-        state = State(var_names)
-    # create scheduler
-    scheduler = Scheduler(t_init, channel_index, gap_channels, dep_graph, l2g_graph, g2l_graph)
-
-    return agent_class(t_init, state, scheduler)
-
-
-def createWorld(t_init, wc_table, var_names):
-    # build channel dependency graph and lookup table for scheduler
-    channel_index = {}
-    dep_graph = {}
-    gap_channels = []
-    for entry in wc_table:
-        channel_index[entry.name] = entry.channel
-        dep_graph[entry.channel] = tuple([channel for channel in entry.wc_dependents])
-        if entry.is_gap:
-            gap_channels.append(entry.channel)
-
-    # create state object
-    state = State(var_names)
-
-    # create scheduler
-    scheduler = Scheduler(t_init, channel_index, gap_channels, dep_graph)
-
-    return World(t_init, state, scheduler)
 
 
 class AbstractManager(object):
@@ -143,30 +37,30 @@ class AbstractManager(object):
         self.max_num_agents = model.max_num_agents
 
         # create world entity
-        self.world = createWorld(tstart,
-                                 model.world_channel_table,
-                                 model.world_vars)
+        self.world = create_world(tstart,
+                                  model.world_channel_table,
+                                  model.world_vars)
 
         # create agent entities
         self.agents = []
         self.root_nodes = []
         for i in range(self.num_agents):
             if i in model.track_lineage:
-                agent = createAgent(LineageAgent,
-                                    tstart,
-                                    model.agent_channel_table,
-                                    model.world_channel_table,
-                                    model.agent_vars,
-                                    model.logger)
+                agent = create_agent(LineageAgent,
+                                     tstart,
+                                     model.agent_channel_table,
+                                     model.world_channel_table,
+                                     model.agent_vars,
+                                     model.logger)
                 self.agents.append(agent)
                 self.root_nodes.append(agent.node)
             else:
-                self.agents.append(createAgent(Agent,
-                                               tstart,
-                                               model.agent_channel_table,
-                                               model.world_channel_table,
-                                               model.agent_vars,
-                                               model.logger))
+                self.agents.append(create_agent(Agent,
+                                                tstart,
+                                                model.agent_channel_table,
+                                                model.world_channel_table,
+                                                model.agent_vars,
+                                                model.logger))
 
         # create queues
         self._add_queue = AgentQueue()
@@ -415,7 +309,6 @@ class AsyncMethodManager(AbstractManager):
 
 
 
-#-------------------------------------------------------------------------------
 def main():
     pass
 

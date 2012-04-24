@@ -10,8 +10,11 @@
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
 
-from base import AgentChannel, WorldChannel, RecordingChannel, save_snapshot, save_lineage
-from managers import FEMethodManager, AsyncMethodManager, Model
+from event import AgentChannel, WorldChannel, RecordingChannel
+from state import save_snapshot, save_lineage, Recorder
+from algorithm import FEMethodManager, AsyncMethodManager
+from model import Model
+
 from copy import copy
 import random
 import math
@@ -166,7 +169,7 @@ def main():
                   track_lineage=[0],
                   parameters=[])
 
-    rc = RecordingChannel(tstep=0.5, recorder=StressModelRecorder())
+    rc = RecordingChannel(tstep=0.5, recorder=Recorder(['x', 'y', 'capacity','alive'],['stress', 'Kw', 'nw']))
     sc = StressChannel(switch_times=[40.0])
     pc = OUProteinChannel(tstep=0.01, tau=10.0, c=1/10)
     dc = DivDeathChannel()

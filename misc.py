@@ -9,60 +9,7 @@
 # Licence:     <your licence>
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
-
 import heapq
-
-def traversal(node, order=-1, adj_list=[]):
-    """
-    Returns an adjacency list (sequence of all [parent, child] pairs) for a root
-    tree node and all its descendants in a topological ordering of the nodes.
-        order == -1 : preorder traversal
-        order ==  0 : inorder traversal
-        order ==  1 : postorder traversal
-
-    """
-    if node is not None:
-        if order == -1:
-            adj_list.append([node.parent, node])
-        traversal(node.lchild, order, adj_list)
-
-        if order == 0:
-            adj_list.append([node.parent, node])
-        traversal(node.rchild, order, adj_list)
-
-        if order == 1:
-            adj_list.append([node.parent, node])
-    return adj_list
-
-class DataLogNode(object): #TODO: rename class LogNode
-    """
-    Keep a log of events over an agent's lifetime and logs for its progeny. Log
-    nodes are linked to form a binary tree.
-
-    """
-    def __init__(self, parent=None):
-        self.parent = parent
-        self.lchild = None
-        self.rchild = None
-        self.tstamp = []
-        self.estamp = []
-        self.log = []
-
-    def record(self, time_stamp, channel_id, state):
-        self.tstamp.append( time_stamp )
-        self.estamp.append( channel_id )
-        self.log.append( state.snapshot() )
-
-    def branch(self): #TODO: rename as branch
-        l_node = DataLogNode(parent=self)
-        self.lchild = l_node
-        r_node = DataLogNode(parent=self)
-        self.rchild = r_node
-        return l_node, r_node
-
-    def traverse(self, order=-1):
-        # TODO: add other traversal methods/non-recursive implementations
-        return traversal(self, -1)
 
 
 class AgentQueue(object):
