@@ -1,17 +1,16 @@
-#-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     23/04/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
+"""
+Name:        entity
+
+Author:      Nezar Abdennur
+
+Created:     23/04/2012
+Copyright:   (c) Nezar Abdennur 2012
+"""
 #!/usr/bin/env python
-from channel import *
-from exception import SchedulingError, SimulationError
-from state import State, DataLogNode
+
+from cps.channel import *
+from cps.exception import SchedulingError, SimulationError
+from cps.state import State, DataLogNode
 from copy import copy
 import heapq
 

@@ -1,14 +1,13 @@
-#-------------------------------------------------------------------------------
-# Name:        channels
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     26/01/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
+"""
+Name:        misc
+
+Author:      Nezar Abdennur <nabdennur@gmail.com>
+Created:     26/01/2012
+Copyright:   (c) Nezar Abdennur 2012
+
+"""
 #!/usr/bin/env python
+
 import heapq
 
 #TODO: We may need to consider the case of equal priority values if

@@ -1,20 +1,16 @@
-#-------------------------------------------------------------------------------
-# Name:        interfaces
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     28/02/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
-#!/usr/bin/env python
 """
+Name:        interface
+
 Interface classes for main components of the simulation framework. These
 interfaces only serve as documentation since python doesn't enforce them.
+(Note: could use ABC's to do that.)
+
+Author:      Nezar Abdennur <nabdennur@gmail.com>
+Created:     28/02/2012
+Copyright:   (c) Nezar Abdennur 2012
 
 """
-
+#!/usr/bin/env python
 
 class IChannel(object):
     """

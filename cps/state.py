@@ -1,14 +1,13 @@
-#-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     23/04/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
+"""
+Name:        state
+
+Author:      Nezar Abdennur <nabdennur@gmail.com>
+Created:     23/04/2012
+Copyright:   (c) Nezar Abdennur 2012
+
+"""
 #!/usr/bin/env python
+
 from copy import copy, deepcopy
 import numpy as np
 import h5py

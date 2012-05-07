@@ -1,16 +1,15 @@
-#-------------------------------------------------------------------------------
-# Name:        model
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     23/04/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
+"""
+Name:        model
+
+Author:      Nezar Abdennur <nabdennur@gmail.com>
+Created:     23/04/2012
+Copyright:   (c) Nezar Abdennur 2012
+
+"""
 #!/usr/bin/env python
+
+from cps.channel import AgentChannel, WorldChannel
 import collections
-from channel import AgentChannel, WorldChannel
 
 # Store simulation channel information in a table of entries specified by
 _ChannelEntry = collections.namedtuple('ChannelEntry', 'channel wc_dependents ac_dependents sync')
@@ -81,11 +80,13 @@ class Model(object):
         self.logger = logger
         self.track_lineage = track_lineage
 
-    def addWorldChannel(self, name, channel, wc_dependents=[], ac_dependents=[]):
+    def addWorldChannel(self, channel, name=None, wc_dependents=[], ac_dependents=[]):
         """
         Add a world channel instance to the model.
 
         """
+        if name is None:
+            name = channel.__class__
         if name in self.world_channel_table:
             raise ValueError("A channel with the same name has already been included in the model.")
         elif not isinstance(channel, WorldChannel):
@@ -94,11 +95,13 @@ class Model(object):
         channel.id = name
         self.world_channel_table[name] = _ChannelEntry(channel, wc_dependents, ac_dependents, False)
 
-    def addAgentChannel(self, name, channel, wc_dependents=[], ac_dependents=[], sync=False):
+    def addAgentChannel(self, channel, name=None, wc_dependents=[], ac_dependents=[], sync=False):
         """
         Add an agent channel instance to the model.
 
         """
+        if name is None:
+            name = channel.__class__
         if name in self.agent_channel_table:
             raise ValueError("A channel with the same name has already been included in the model.")
         elif not isinstance(channel, AgentChannel):

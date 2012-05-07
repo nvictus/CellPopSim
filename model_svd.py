@@ -10,11 +10,7 @@
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
 
-from channel import AgentChannel, WorldChannel, RecordingChannel
-from state import Recorder, save_snapshot, save_lineage
-from simulator import FEMethodSimulator, AsyncMethodSimulator
-from model import Model
-
+from cps import *
 from copy import copy
 import random
 import math

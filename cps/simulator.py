@@ -1,16 +1,16 @@
-#-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     23/04/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
+"""
+Name:        simulator
+
+Author:      Nezar Abdennur <nabdennur@gmail.com>
+
+Created:     23/04/2012
+Copyright:   (c) Nezar Abdennur 2012
+
+"""
 #!/usr/bin/env python
-from entity import World, Agent, LineageAgent, AgentQueue, create_agent, create_world
-from misc import IndexedPriorityQueue
+
+from cps.entity import World, Agent, LineageAgent, AgentQueue, create_agent, create_world
+from cps.misc import IndexedPriorityQueue
 import random
 
 class BaseSimulator(object):

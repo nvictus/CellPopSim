@@ -1,13 +1,11 @@
-#-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     23/04/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
+"""
+Name:        exception
+
+Author:      Nezar Abdennur <nabdennur@gmail.com>
+Created:     23/04/2012
+Copyright:   (c) Nezar Abdennur 2012
+
+"""
 #!/usr/bin/env python
 
 class SimulationError(Exception):
