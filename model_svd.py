@@ -10,34 +10,34 @@
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
 
-from base import AgentChannel, WorldChannel, RecordingChannel, save_lineage, save_snapshot
+from channel import AgentChannel, WorldChannel, RecordingChannel
+from state import Recorder, save_snapshot, save_lineage
+from simulator import FEMethodSimulator, AsyncMethodSimulator
+from model import Model
+
+from copy import copy
 import random
 import math
-from copy import copy
-
-from managers import FEMethodManager, AsyncMethodManager, Model
 import time
-import numpy as np
-import h5py
 
 DEBUG = 0
 
 #-------------------------------------------------------------------------------
 # STOCHASTICS-VOLUME-DIVISON MODEL
 #---------------------------------
-class SVDModelRecorder(object):
-    """ Saves population snapshots """
-    def __init__(self):
-        self.x1 = []
-        self.x2 = []
-        self.v = []
-        self.t = []
-
-    def snapshot(self, gdata, cells, time):
-        self.x1.append([copy(cell.state.x[0]) for cell in cells])
-        self.x2.append([copy(cell.state.x[1]) for cell in cells])
-        self.v.append([copy(cell.state.v) for cell in cells])
-        self.t.append(time)
+##class SVDModelRecorder(object):
+##    """ Saves population snapshots """
+##    def __init__(self):
+##        self.x1 = []
+##        self.x2 = []
+##        self.v = []
+##        self.t = []
+##
+##    def snapshot(self, gdata, cells, time):
+##        self.x1.append([copy(cell.state.x[0]) for cell in cells])
+##        self.x2.append([copy(cell.state.x[1]) for cell in cells])
+##        self.v.append([copy(cell.state.v) for cell in cells])
+##        self.t.append(time)
 
 class GillespieChannel(AgentChannel):
     """ Performs Gillespie SSA """
@@ -60,8 +60,8 @@ class GillespieChannel(AgentChannel):
 
         return time + self.tau
 
-    def fireEvent(self, cell, gdata, time, event_time, aq, rq):
-        cell.fireChannel('VolumeChannel', gdata, aq, rq)
+    def fireEvent(self, cell, gdata, time, event_time, q):
+        cell.fireChannel('VolumeChannel', gdata, event_time, q)
         for i in range(0, len(cell.state.x)):
             cell.state.x[i] += self.stoich_list[self.mu][i]
         return True
@@ -74,7 +74,7 @@ class VolumeChannel(AgentChannel):
     def scheduleEvent(self, cell, gdata, time, src):
         return time + self.tstep
 
-    def fireEvent(self, cell, gdata, time, event_time, aq, rq):
+    def fireEvent(self, cell, gdata, time, event_time, q):
         cell.state.v *= math.exp(gdata.state.p['kV']*(event_time-time))
         return True
 
@@ -86,8 +86,8 @@ class DivisionChannel(AgentChannel):
     def scheduleEvent(self, cell, gdata, time, src):
         return time + math.log(cell.state.v_thresh/cell.state.v)/gdata.state.p['kV']
 
-    def fireEvent(self, cell, gdata, time, event_time, aq, rq):
-        cell.fireChannel('VolumeChannel', gdata, aq, rq)
+    def fireEvent(self, cell, gdata, time, event_time, q):
+        cell.fireChannel('VolumeChannel', gdata, event_time, q) #BUG HERE!!!!
         new_cell = cell.clone()
         v_mother = cell.state.v
         cell.state.v, new_cell.state.v = self.prob*v_mother, (1-self.prob)*v_mother
@@ -96,7 +96,7 @@ class DivisionChannel(AgentChannel):
         x_mother = cell.state.x[:]
         cell.state.x[0], new_cell.state.x[0] = self._binomialPartition(x_mother[0])
         cell.state.x[1], new_cell.state.x[1] = self._binomialPartition(x_mother[1])
-        aq.addAgent(cell, new_cell, event_time)
+        q.enqueue(q.ADD_AGENT, new_cell, event_time)
         return True
 
     def _binomialPartition(self, n):
@@ -108,7 +108,10 @@ class DivisionChannel(AgentChannel):
 
 
 
-def main():
+
+#-------------------------------------------------------------------------------
+
+if __name__ == '__main__':
     s = (( 1, 0 ),
          ( 0, 1 ),
          (-1, 0 ),
@@ -120,7 +123,7 @@ def main():
                  p['gR']*x[0],
                  p['gP']*x[1] ]
 
-    def initialize(cells, gdata, p):
+    def init(cells, gdata, p):
         # initialize simulation entities
         gdata.state.p = {'kR':0.01,
                          'kP':1,
@@ -137,42 +140,42 @@ def main():
         return [state.x[0],state.x[1],state.v]
 
 
-    rc = RecordingChannel(50, recorder=SVDModelRecorder())
+    rc = RecordingChannel( 50, recorder=Recorder(['x','v','v_thresh'], []) )
     gc = GillespieChannel(prop_fcn, s)
     vc = VolumeChannel(5)
     dc = DivisionChannel(0.5)
 
-    model = Model(init_num_agents=2,
+    model = Model(init_num_agents=10,
                   max_num_agents=100,
                   world_vars=('p'),
                   agent_vars=('x', 'v', 'v_thresh', 't_last'),
-                  init_fcn=initialize,
+                  initializer=init,
                   logger=my_logger,
                   track_lineage=[0],
                   parameters=[])
 
     model.addWorldChannel(channel=rc,
                           name='RecordingChannel',
-                          is_gap=False,
                           ac_dependents=[],
                           wc_dependents=[])
     model.addAgentChannel(channel=gc,
                           name='GillespieChannel',
-                          is_gap=False,
+                          sync=False,
                           ac_dependents=[],
                           wc_dependents=[])
     model.addAgentChannel(channel=vc,
                           name='VolumeChannel',
-                          is_gap=True,
+                          sync=True,
                           ac_dependents=[],
                           wc_dependents=[])
     model.addAgentChannel(channel=dc,
                           name='DivisionChannel',
-                          is_gap=False,
+                          sync=False,
                           ac_dependents=[gc,vc],
                           wc_dependents=[])
 
-    mgr = AsyncMethodManager(model, 0) #FEMethodManager(model, 0)
+    mgr = AsyncMethodSimulator(model, 0) #FEMethodManager(model, 0)
+    mgr.initialize()
 
     t0 = time.time()
     mgr.runSimulation(10000)
@@ -187,7 +190,3 @@ def main():
 
 
 
-
-#-------------------------------------------------------------------------------
-if __name__ == '__main__':
-    main()

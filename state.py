@@ -9,17 +9,18 @@
 # Licence:     <your licence>
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
+from copy import copy, deepcopy
 import numpy as np
 import h5py
-from copy import copy, deepcopy
-
 
 def default_logger(state):
+    # Default function used to log snapshots of agents' states
     return [copy(getattr(state,name)) for name in state._names]
 
 class State(object):
     """
-    Contain the state variables of an entity.
+    Provide the state attributes of an entity according to the variable names
+    specified in a model.
 
     """
     def __init__(self, var_names, logger=default_logger):
@@ -30,24 +31,20 @@ class State(object):
             self._names.append(name)
 
     def __copy__(self):
-        new_state = State(self._names, self._do_log)
+        other = State(self._names, self._do_log)
         for name in self._names:
-            setattr(new_state, name, copy(getattr(self, name)))
-        return new_state
+            setattr(other, name, copy(getattr(self, name)))
+        return other
 
     def snapshot(self):
         return self._do_log(self)
 
 
-def _traversal(node, order=-1, adj_list=[]):
-    """
-    Returns an adjacency list (sequence of all [parent, child] pairs) for a root
-    tree node and all its descendants in a topological ordering of the nodes.
-        order == -1 : preorder traversal
-        order ==  0 : inorder traversal
-        order ==  1 : postorder traversal
+#-------------------------------------------------------------------------------
+# The following classes are for logging/recording simulation data during a
+# simulation run
 
-    """
+def _traversal(node, order=-1, adj_list=[]):
     if node is not None:
         if order == -1:
             adj_list.append([node.parent, node])
@@ -61,8 +58,7 @@ def _traversal(node, order=-1, adj_list=[]):
             adj_list.append([node.parent, node])
     return adj_list
 
-
-class DataLogNode(object): #TODO: rename class LogNode
+class DataLogNode(object):
     """
     Keep a log of events over an agent's lifetime and logs for its progeny. Log
     nodes are linked to form a binary tree.
@@ -89,8 +85,16 @@ class DataLogNode(object): #TODO: rename class LogNode
         return l_node, r_node
 
     def traverse(self, order=-1):
+        """
+        Returns an adjacency list (sequence of all [parent, child] pairs) for a root
+        tree node and all its descendants in a topological ordering of the nodes.
+            order == -1 : preorder traversal
+            order ==  0 : inorder traversal
+            order ==  1 : postorder traversal
+
+        """
         # TODO: add other traversal methods/non-recursive implementations
-        return _traversal(self, -1)
+        return _traversal(self, order, [])
 
 
 class Recorder(object):
@@ -107,66 +111,90 @@ class Recorder(object):
         for name in world_vars:
             setattr(self, name, [])
 
-    def snapshot(self, gdata, cells, time):
+    def record(self, time, world, agents):
         self.time.append(time)
         for name in self._agent_vars:
-            getattr(self, name).append( [copy(getattr(cell.state, name)) for cell in cells] )
+            getattr(self, name).append( [copy(getattr(agent.state, name)) for agent in agents] )
         for name in self._world_vars:
-            getattr(self, name).append( copy(getattr(gdata.state, name)))
+            getattr(self, name).append( copy(getattr(world.state, name)) )
+
+    def getFields(self):
+        return self._world_vars + self._agent_vars
 
 
-def save_snapshot(filename, simdata):
+
+#-------------------------------------------------------------------------------
+# These functions convert recorded data into numpy arrays and save them to disk
+# in hdf5 format.
+
+def save_snapshot(filename, recorder):
+    """
+    Assumes recorder has a field named "time" and the other recorded state
+    variables can be converted directly into numpy arrays.
+
+    """
     try:
-        dfile = h5py.File(filename, 'w') #'data/stress_data.hdf5'
+        dfile = h5py.File(filename, 'w')
         dfile.create_dataset(name='time',
-                             data=np.array(simdata.t))
-        for dname in simdata.datasets:
+                             data=np.array(recorder.time))
+        for dname in recorder.getFields():
             dfile.create_dataset(name=dname,
-                                 data=np.array(getattr(simdata, dname)))
+                                 data=np.array(getattr(recorder, dname)))
+
     finally:
         dfile.close()
 
 
-def save_lineage(filename, root, var_names):
-    node_list = root.traverse()
+def save_lineage(filename, root_node, var_names):
+    """
+    Traverses datalog tree and restructures the simulation data -- for each
+    state variable, the event history of all the cells is concatenated and
+    flattened into a single column of data.
+    An adjacency list with index pointers (starting row, number of rows) is also
+    provided so that time series data can be extracted for individual cells.
+    Recording scheme originally devised by Andrei Anisenia.
+
+    """
+    adj_list = root_node.traverse()
     tstamp = []
     estamp = []
     data = []
-    adj_list = []
+    output_adj_list = []
+
     row = 0
-    for parent, child in node_list:
+    for parent, child in adj_list:
         pid = id(parent) if parent is not None else 0
         cid = id(child)
+
         tstamp.extend(child.tstamp)
         estamp.extend(child.estamp)
         data.extend(child.log)
-        adj_list.append([pid, cid, row, len(child.log)])
+
+        output_adj_list.append([pid, cid, row, len(child.log)])
         row += len(child.log)
 
     try:
         dfile = h5py.File(filename,'w')
-        dfile.create_dataset(name='adj_list_info',
-                             data=np.array(['parent_id', 'id', 'start_row', 'num_events'], dtype=np.bytes_))
-        dfile.create_dataset(name='adj_list',
-                             data=np.array(adj_list))
+        # Tree adjacency list
+        dfile.create_dataset(name='adj_info',
+                             data=np.array(['parent_id',
+                                            'id',
+                                            'start_row',
+                                            'num_events'], dtype=np.bytes_))
+        dfile.create_dataset(name='adj_data',
+                             data=np.array(output_adj_list))
 
-        dfile.create_dataset(name='timestamp',
+        # Log of time and event type
+        dfile.create_dataset(name='time',
                              data=np.array(tstamp))
-        dfile.create_dataset(name='eventstamp',
+        dfile.create_dataset(name='event',
                              data=np.array(estamp, dtype=np.bytes_))
-        dfile.create_dataset(name='node_data_info',
+
+        # Data values
+        dfile.create_dataset(name='state_info',
                              data=np.array(var_names, dtype=np.bytes_))
-        dfile.create_dataset(name='node_data',
+        dfile.create_dataset(name='state_data',
                              data=np.array(data))
     finally:
         dfile.close()
 
-
-
-
-
-def main():
-    pass
-
-if __name__ == '__main__':
-    main()

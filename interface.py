@@ -11,8 +11,7 @@
 #!/usr/bin/env python
 """
 Interface classes for main components of the simulation framework. These
-interfaces only serve as documentation since they cannot actually be
-enforced.
+interfaces only serve as documentation since python doesn't enforce them.
 
 """
 
@@ -30,7 +29,7 @@ class IChannel(object):
         """
         raise NotImplementedError
 
-    def fireEvent(self, entity, cargo, time, event_time, add_queue, rem_queue):
+    def fireEvent(self, entity, cargo, time, event_time, queue):
         """
         Perform a simulation event.
         Return True if the state of the entity was modified, else False.
@@ -46,7 +45,7 @@ class IWorld(object):
     A world entity holds common resources and global variables.
 
     """
-    def fireChannel(self, name, cargo, aq, rq):
+    def fireChannel(self, name, cargo, event_time, q):
         """
         Perform simulation event of named channel.
         The simulation clock is not advanced.
@@ -76,7 +75,7 @@ class IAgent(object):
     An agent entity holds the state of an individual. Agents can be replicated.
 
     """
-    def fireChannel(self, name, cargo, aq, rq):
+    def fireChannel(self, name, cargo, event_time, q):
         """
         Perform simulation event of named channel.
         The simulation clock is not advanced.
@@ -119,7 +118,7 @@ class IScheduler(object):
         """
         raise NotImplementedError
 
-    def fireNextChannel(self, cargo, aq, rq):
+    def fireNextChannel(self, cargo, q):
         """
         Fire the simulation channel with the earliest event time.
         Advance the simulation clock.
@@ -135,7 +134,7 @@ class IScheduler(object):
         """
         raise NotImplementedError
 
-    def closeGaps(self, cargo, aq, rq, source, tbarrier):
+    def closeGaps(self, cargo, q, source, tbarrier):
         """
         Fire gap simulation channels with event time 'tbarrier'.
         Reschedule any dependent channels.
@@ -162,5 +161,5 @@ class IRecorder(object):
     Record global simulation data.
 
     """
-    def snapshot(self, time, agents, world, itr):
+    def record(self, time, world, agents):
         raise NotImplementedError

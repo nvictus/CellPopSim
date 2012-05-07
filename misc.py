@@ -11,44 +11,6 @@
 #!/usr/bin/env python
 import heapq
 
-
-class AgentQueue(object):
-    """
-    Holds a list of agents sorted by birth time.
-
-    Attributes:
-        heap (list): binary heap holding parent and child agents
-
-    """
-    class Item(object):
-        def __init__(self, div_time, parent, child):
-            self.div_time = div_time
-            self.parent = parent
-            self.child = child
-
-        def __lt__(self, other):
-            return self.div_time < other.div_time
-
-    def __init__(self):
-        """
-        Create an empty queue.
-
-        """
-        self.heap = []
-
-    def addAgent(self, parent, child, div_time):
-        # TODO: if parent == child, throw error...
-        heapq.heappush(self.heap, AgentQueue.Item(div_time, parent, child))
-
-    def popAgent(self):
-        item = heapq.heappop(self.heap)
-        return item.parent, item.child
-
-    def isEmpty(self):
-        return len(self.heap) == 0
-
-
-
 #TODO: We may need to consider the case of equal priority values if
 #      we wish to enforce an ordering on channels with equal event times.
 class IndexedPriorityQueue(object):
@@ -67,24 +29,24 @@ class IndexedPriorityQueue(object):
 
     """
     class Entry(object):
-        def __init__(self, item, value):
+        def __init__(self, item, priority_key):
+            self.priority_key = priority_key
             self.item = item
-            self.value = value
 
         def __lt__(self, other):
-            return self.value < other.value
+            return self.priority_key < other.priority_key
 
         def __gt__(self, other):
-            return self.value > other.value
+            return self.priority_key > other.priority_key
 
-    def __init__(self, items, values):
+    def __init__(self, items, priorities):
         """
         Heapifies an array of tree nodes and creates the index structure.
-        Each node stores an Entry object [item, value].
+        Each node stores an Entry object [priority, item].
 
         Args:
-            items (list): items associated with a priority-determining value
-            values (list): comparable values
+            items (list): items associated with a priority-determining key
+            priorities (list): comparable values
 
         Notes:
             Index structure is a hash table mapping 'item' -> location of entry
@@ -93,8 +55,8 @@ class IndexedPriorityQueue(object):
 
         """
         self.heap = []
-        for item, value in zip(items, values):
-            entry = IndexedPriorityQueue.Entry(item, value)
+        for item, priority_key in zip(items, priorities):
+            entry = IndexedPriorityQueue.Entry(item, priority_key)
             self.heap.append(entry)
         heapq.heapify(self.heap)
 
@@ -111,21 +73,21 @@ class IndexedPriorityQueue(object):
 
         """
         min_entry = self.heap[0]
-        return min_entry.value, min_entry.item
+        return min_entry.priority_key, min_entry.item
 
-    def add(self, item, value):
+    def add(self, item, priority_key):
         """
         Add a new entry while maintaining the heap invariant and the index
         structure.
 
         """
-        entry = IndexedPriorityQueue.Entry(item, value)
+        entry = IndexedPriorityQueue.Entry(item, priority_key)
         index = len(self.heap)
         self.heap.append(entry)
         self._index_of[item] = index
         self._bubbleUp(index)
 
-    def update(self, item, new_value):
+    def update(self, item, new_key):
         """
         Update an existing entry while maintaining the heap invariant and the
         index structure.
@@ -133,10 +95,10 @@ class IndexedPriorityQueue(object):
         """
         index = self._index_of[item]
         entry = self.heap[index]
-        entry.value = new_value
+        entry.priority_key = new_key
         self._updateReheapify(index)
 
-    def replace(self, old_item, new_item, value=None):
+    def replace(self, old_item, new_item, new_key=None):
         """
         Replace the item of an existing entry. Optionally, change the priority
         while maintaining the heap invariant and the index structure.
@@ -147,8 +109,8 @@ class IndexedPriorityQueue(object):
         entry.item = new_item
         self._index_of[new_item] = index
         del self._index_of[old_item]
-        if value is not None:
-            entry.value = value
+        if new_key is not None:
+            entry.priority_key = new_key
             self._updateReheapify(index)
 
     def _swap(self, indexA, indexB):
@@ -211,14 +173,14 @@ class IndexedPriorityQueue(object):
 
     def _printHeap(self):
         for entry in self.heap:
-            print(entry.value, entry.item)
+            print(entry.priority_key, entry.item)
 
-    def _sortedValues(self):
+    def _sortedKeys(self):
         h = self.heap[:]
-        values = []
+        keys = []
         while h:
-            values.append(heapq.heappop(h).value)
-        return values
+            keys.append(heapq.heappop(h).priority_key)
+        return keys
 
 
 
@@ -235,35 +197,35 @@ class IndexedPriorityQueue(object):
 
 # Some tests...
 #-------------------------------------------------------------------------------
-#import unittest
-import random
+def _test_ipq():
+    import random
+    from event import AgentChannel
 
-def main():
-    p = []; c = []
+    # Test IPQ
+    #----------
+    priorities = []; items = []
     n = 50
     m = 10
     for i in range(0,n):
-        p.append(random.uniform(0,m))
-        c.append(Channel())
+        priorities.append(random.uniform(0,m))
+        items.append(AgentChannel())
 
-    pq = IndexedPriorityQueue(c, p)
+    pq = IndexedPriorityQueue(items, priorities)
 
-    pq.update(c[random.randint(0,n)], random.uniform(0,m))
-    pq.update(c[random.randint(0,n)], random.uniform(0,m))
-    pq.update(c[random.randint(0,n)], random.randint(0,m))
-    pq.update(c[random.randint(0,n)], random.randint(0,m))
-    pq.update(c[random.randint(0,n)], random.randint(0,m))
+    pq.update(items[random.randint(0,n-1)], random.uniform(0,m))
+    pq.update(items[random.randint(0,n-1)], random.uniform(0,m))
+    pq.update(items[random.randint(0,n-1)], random.randint(0,m))
+    pq.update(items[random.randint(0,n-1)], random.randint(0,m))
+    pq.update(items[random.randint(0,n-1)], random.randint(0,m))
 
-    for entry in pq.heap: print(entry.value)
+    for entry in pq.heap:
+        print(entry.priority_key)
     print()
 
-    t = pq.sortedValues()
-    for elem in t: print(elem)
+    t = pq._sortedKeys()
+    for elem in t:
+        print(elem)
     assert(t == sorted(t))
 
-    print()
-
-
-#-------------------------------------------------------------------------------
 if __name__ == '__main__':
-    main()
+    _test_ipq()

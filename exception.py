@@ -9,6 +9,7 @@
 # Licence:     <your licence>
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
+
 class SimulationError(Exception):
     """
     Base class for exceptions in this module.
@@ -34,9 +35,6 @@ class SchedulingError(SimulationError):
                'attempted to schedule an event at t=' + str(self.sched_time) + ', ' + \
                'but the agent\'s clock is currently at t=' + str(self.clock_time) + '.'
 
-
-def main():
+class FiringError(SimulationError):
     pass
 
-if __name__ == '__main__':
-    main()
