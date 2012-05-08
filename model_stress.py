@@ -10,11 +10,7 @@
 #-------------------------------------------------------------------------------
 #!/usr/bin/env python
 
-from event import AgentChannel, WorldChannel, RecordingChannel
-from state import save_snapshot, save_lineage, Recorder
-from algorithm import FEMethodManager, AsyncMethodManager
-from model import Model
-
+from cps import *
 from copy import copy
 import random
 import math
@@ -66,7 +62,7 @@ class StressChannel(WorldChannel):
             self.count += 1
         return event_time
 
-    def fireEvent(self, gdata, cells, time, event_time, aq, rq):
+    def fireEvent(self, gdata, cells, time, event_time, q):
         gdata.state.stress = not(gdata.state.stress)
         return True
 
@@ -86,7 +82,7 @@ class OUProteinChannel(AgentChannel):
     def scheduleEvent(self, cell, gdata, time, src):
         return time + self.tstep
 
-    def fireEvent(self, cell, gdata, time, event_time, aq, rq):
+    def fireEvent(self, cell, gdata, time, event_time, q):
         # update protein expression
         mu = math.exp(-self.tstep/self.tau)
         sig = math.sqrt((self.c*self.tau/2)*(1-mu**2))
@@ -122,19 +118,19 @@ class DivDeathChannel(AgentChannel):
         else:
             return float('inf')
 
-    def fireEvent(self, cell, gdata, time, event_time, aq, rq):
+    def fireEvent(self, cell, gdata, time, event_time, q):
         if self.event_flag == 1:
             new_cell = cell.clone()
             cell.state.capacity = 1.0
             new_cell.state.capacity = 1.0
-            aq.addAgent(cell, new_cell, event_time)
+            q.enqueue(q.ADD_AGENT, new_cell, event_time)
             #global DEBUG
             #DEBUG += 1
             #print(DEBUG)
             return True
         elif self.event_flag == 2:
             cell.state.alive = False
-            cell._enabled = False
+            cell.stop()
             #print('dead!')
             return False
         else:
@@ -164,7 +160,7 @@ def main():
                   max_num_agents=100,
                   world_vars=('stress', 'Kw', 'nw'),
                   agent_vars=('x', 'y', 'capacity','alive'),
-                  init_fcn=initialize,
+                  initializer=initialize,
                   logger=my_logger,
                   track_lineage=[0],
                   parameters=[])
@@ -176,26 +172,24 @@ def main():
 
     model.addWorldChannel(channel=rc,
                           name='RecordingChannel',
-                          is_gap=False,
                           ac_dependents=[],
                           wc_dependents=[])
     model.addWorldChannel(channel=sc,
                           name='StressChannel',
-                          is_gap=False,
                           ac_dependents=[pc, dc],
                           wc_dependents=[])
     model.addAgentChannel(channel=pc,
                           name='Expression+Capacity',
-                          is_gap=False,
+                          sync=False,
                           ac_dependents=[dc],
                           wc_dependents=[])
     model.addAgentChannel(channel=dc,
                           name='DivisionChannel',
-                          is_gap=False,
+                          sync=False,
                           ac_dependents=[pc],
                           wc_dependents=[])
 
-    mgr = AsyncMethodManager(model, 0)
+    mgr = AsyncMethodSimulator(model, 0)
 
     t0 = time.time()
     mgr.runSimulation(80)
@@ -212,11 +206,5 @@ def main():
     #pickle.dump(sd, save_file)
     #save_file.close()
 
-
-
-
-
-
-#-------------------------------------------------------------------------------
 if __name__ == '__main__':
     main()

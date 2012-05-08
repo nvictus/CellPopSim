@@ -21,19 +21,6 @@ DEBUG = 0
 #-------------------------------------------------------------------------------
 # STOCHASTICS-VOLUME-DIVISON MODEL
 #---------------------------------
-##class SVDModelRecorder(object):
-##    """ Saves population snapshots """
-##    def __init__(self):
-##        self.x1 = []
-##        self.x2 = []
-##        self.v = []
-##        self.t = []
-##
-##    def snapshot(self, gdata, cells, time):
-##        self.x1.append([copy(cell.state.x[0]) for cell in cells])
-##        self.x2.append([copy(cell.state.x[1]) for cell in cells])
-##        self.v.append([copy(cell.state.v) for cell in cells])
-##        self.t.append(time)
 
 class GillespieChannel(AgentChannel):
     """ Performs Gillespie SSA """
@@ -102,12 +89,27 @@ class DivisionChannel(AgentChannel):
         return num_heads, num_tails
 
 
+class SVDModelRecorder(Recorder):
+    """ Saves population snapshots """
+    def __init__(self):
+        self._agent_vars = ('x1','x2','v')
+        self._world_vars = ()
+        self.time = []
+        self.x1 = []
+        self.x2 = []
+        self.v = []
+
+    def record(self, time, gdata, cells):
+        self.time.append(time)
+        self.x1.append([copy(cell.state.x[0]) for cell in cells])
+        self.x2.append([copy(cell.state.x[1]) for cell in cells])
+        self.v.append([copy(cell.state.v) for cell in cells])
+
 
 
 
 #-------------------------------------------------------------------------------
-
-if __name__ == '__main__':
+def main():
     s = (( 1, 0 ),
          ( 0, 1 ),
          (-1, 0 ),
@@ -136,7 +138,7 @@ if __name__ == '__main__':
         return [state.x[0],state.x[1],state.v]
 
 
-    rc = RecordingChannel( 50, recorder=Recorder(['x','v','v_thresh'], []) )
+    rc = RecordingChannel( 50, recorder=SVDModelRecorder() )
     gc = GillespieChannel(prop_fcn, s)
     vc = VolumeChannel(5)
     dc = DivisionChannel(0.5)
@@ -170,19 +172,22 @@ if __name__ == '__main__':
                           ac_dependents=[gc,vc],
                           wc_dependents=[])
 
-    mgr = AsyncMethodSimulator(model, 0) #FEMethodManager(model, 0)
-    mgr.initialize()
+    mgr = AsyncMethodSimulator(model, 0) #FEMethodSimulator(model, 0)
 
     t0 = time.time()
     mgr.runSimulation(10000)
     t = time.time()
     print(t-t0)
 
-    sd = rc.getRecorder()
+    recorder = rc.getRecorder()
     root = mgr.root_nodes[0]
 
-    #save_snapshot('data/svd_data.hdf5',sd)
+    #save_snapshot('data/svd_data.hdf5', recorder)
     save_lineage('data/svd_lineage.hdf5', root, ['x0','x1','v'])
+
+
+if __name__=='__main__':
+    main()
 
 
 

@@ -134,11 +134,9 @@ def save_snapshot(filename, recorder):
     """
     try:
         dfile = h5py.File(filename, 'w')
-        dfile.create_dataset(name='time',
-                             data=np.array(recorder.time))
+        dfile.create_dataset(name='time', data=np.array(recorder.time))
         for dname in recorder.getFields():
-            dfile.create_dataset(name=dname,
-                                 data=np.array(getattr(recorder, dname)))
+            dfile.create_dataset(name=dname, data=np.array(getattr(recorder, dname)))
 
     finally:
         dfile.close()
