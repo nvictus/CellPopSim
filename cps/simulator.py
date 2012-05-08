@@ -65,6 +65,8 @@ class BaseSimulator(object):
         # create queues
         self._agent_queue = AgentQueue()
 
+        self.initialize()
+
     def initialize(self):
         raise NotImplementedError
 
@@ -77,15 +79,11 @@ class BaseSimulator(object):
 # First-Entity (synchronous) Method
 
 class FEMethodSimulator(BaseSimulator):
-    def __init__(self, model, tstart):
-        """
-        Additional attributes:
-            timetable (IndexedPriorityQueue)
+    """
+    Additional attributes:
+        timetable (IndexedPriorityQueue)
 
-        """
-        super(FEMethodSimulator, self).__init__(model, tstart)
-        self.timetable = None
-
+    """
     def initialize(self):
         """
         Apply user-defined initialization function and schedule all simulation
@@ -122,7 +120,7 @@ class FEMethodSimulator(BaseSimulator):
 
         while (tmin <= tstop):
             if emin is world:
-                # synchronize agents with the world (fire gap channels)
+                # synchronize agents with the world (fire sync channels)
                 for agent in agents:
                     agent.synchronize(tmin, world, q)
                     self.timetable.update(agent, agent.next_event_time)
@@ -130,7 +128,6 @@ class FEMethodSimulator(BaseSimulator):
                 # next world event
                 world.fireNextChannel(agents, q)
                 world.rescheduleDependentChannels(agents)
-                ##world.closeGaps(tmin, agents, aq, rq)
                 self.timetable.update(world, world.next_event_time)
                 if not world.is_enabled: # terminate simulation prematurely
                     return
@@ -138,7 +135,7 @@ class FEMethodSimulator(BaseSimulator):
                 # reschedule agent channels affected by world event
                 if world.is_modified:
                     for agent in agents:
-                        agent.rescheduleG2L(world, world)
+                        agent.crossScheduleG2L(world, world)
                         self.timetable.update(agent, agent.next_event_time)
 
             elif emin.is_enabled:      #(emin is an agent)
@@ -149,7 +146,7 @@ class FEMethodSimulator(BaseSimulator):
 
                 # reschedule world channels affected by agent event
                 if emin.is_modified:
-                    world.rescheduleL2G(agents, emin)
+                    world.crossScheduleL2G(agents, emin)
                     self.timetable.update(world, world.next_event_time)
 
              # add/substitute new agents
@@ -167,26 +164,25 @@ class FEMethodSimulator(BaseSimulator):
                 parent = new_agent._parent
 
                 # Finalize the event which added this agent to the queue
-                # Update agent's schedule
-                new_agent.finalizePrevEvent()
+                # and update agent's schedule
+                new_agent.finalizePrevEvent() #removes _parent reference
                 new_agent.reschedulePrevChannel(self.world)
                 new_agent.rescheduleDependentChannels(self.world)
-                #NOTE: no need to fire sync channels here
 
                 if self.num_agents < self.max_num_agents:
                     # NORMAL MODE: Add agent to population
-                    # add to agent list
+
+                    # add to agent list and ipq
                     self.agents.append(new_agent)
-                    # add to ipq
                     self.timetable.add(new_agent, new_agent.next_event_time)
                     self.num_agents += 1
                 else:
                     # CONSTANT-NUMBER MODE: Substitute agent into population
+
                     index = random.randint(0, len(self.agents)-1)
                     target = self.agents[index]
-                    # substitute in agent list
+                    # substitute in agent list and ipq
                     self.agents[index] = new_agent
-                    # substitute in ipq
                     self.timetable.replace(target, new_agent, new_agent.next_event_time)
                     del target
 
@@ -195,6 +191,7 @@ class FEMethodSimulator(BaseSimulator):
 
                 if self.num_agents < self.max_num_agents:
                     # NORMAL MODE: Remove agent from population
+
                     try:
                         self.agents.remove(target)
                     except ValueError:
@@ -207,8 +204,9 @@ class FEMethodSimulator(BaseSimulator):
                         raise SimulationError("The population crashed!")
 
                 else:
-                    # CONSTANT-NUMBER MODE: Substitute with a randomly chosen
+                    # CONSTANT-NUMBER MODE: Replace with a randomly chosen
                     # agent
+
                     try:
                         i_target = self.agents.index(target)
                     except ValueError:
@@ -279,17 +277,16 @@ class AsyncMethodSimulator(BaseSimulator):
 
             # reschedule world channels affected by agent events
             # ***NOTE: Allowing this could be problematic...
-            world.rescheduleL2GAsync(agents, pending_world_channels)
+            world.crossScheduleL2GAsync(agents, pending_world_channels)
 
             # next world event
             world.fireNextChannel(agents, q)
             world.rescheduleDependentChannels(agents)
-            ##world.closeGaps(tsync, agents, aq, rq)
 
             # reschedule agent events affected by world event
             if world.is_modified:
                 for agent in agents:
-                    agent.rescheduleG2L(world, world)
+                    agent.crossScheduleG2L(world, world)
 
             # next sync barrier
             tsync = world.next_event_time
@@ -311,7 +308,6 @@ class AsyncMethodSimulator(BaseSimulator):
                     new_agent.finalizePrevEvent()
                     new_agent.reschedulePrevChannel(self.world)
                     new_agent.rescheduleDependentChannels(self.world)
-                    #new_agent.synchronize(tsync, self.world, self._agent_queue)
 
                     # Add agent
                     self.agents.append(new_agent)
@@ -324,7 +320,6 @@ class AsyncMethodSimulator(BaseSimulator):
                     new_agent.finalizePrevEvent()
                     new_agent.reschedulePrevChannel(self.world)
                     new_agent.rescheduleDependentChannels(self.world)
-                    #new_agent.synchronize(tsync, self.world, self._agent_queue)
 
                     # Replace a randomly chosen agent
                     index = random.randint(0, len(self.agents)-1)
@@ -376,10 +371,3 @@ class AsyncMethodSimulator(BaseSimulator):
         replaced.clear()
         del replaced
 
-
-
-def main():
-    pass
-
-if __name__ == '__main__':
-    main()

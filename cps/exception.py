@@ -22,17 +22,24 @@ class SchedulingError(SimulationError):
     current clock time.
 
     """
-    def __init__(self, entity, channel, clock_time, sched_time):
-        self.entity = entity
-        self.channel = channel
-        self.clock_time = clock_time
-        self.sched_time = sched_time
+    def __init__(self, *args):
+        self.channel, self.clock_time, self.sched_time = args
 
     def __str__(self):
-        return repr(self.channel) + ' ' + \
-               'attempted to schedule an event at t=' + str(self.sched_time) + ', ' + \
-               'but the agent\'s clock is currently at t=' + str(self.clock_time) + '.'
+        return str(self.channel.id) + " attempted to schedule an event at t=" + str(self.sched_time)\
+               + ", but the agent's clock is currently at t=" + str(self.clock_time) + "."
 
 class FiringError(SimulationError):
-    pass
+    """
+    Raise if user attempts to fire a channel at a time preceding the entity's
+    current clock time.
+
+    """
+    def __init__(self, *args):
+        self.channel, self.clock_time, self.fire_time = args
+
+    def __str__(self):
+        return "Cannot fire an event in the past! " + \
+               str(self.channel.id) + " attempted to fire an event at t=" + str(self.fire_time)\
+               + ", but the agent's clock is currently at t=" + str(self.clock_time) + "."
 

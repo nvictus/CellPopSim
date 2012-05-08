@@ -14,6 +14,7 @@ from cps.state import State, DataLogNode
 from copy import copy
 import heapq
 
+
 #-------------------------------------------------------------------------------
 # Factory functions for creating entities from model input data
 
@@ -25,7 +26,7 @@ def create_agent(agent_class, t_init, ac_table, wc_table, var_names, logger):
     # make a copy of each channel instance provided
     copied = {entry.channel:copy(entry.channel) for entry in ac_table.values()}
 
-    # build channel dependency graphs and lookup table for scheduler
+    # build channel dependency graphs and local event schedule
     g2l_graph = {}
     for entry in wc_table.values():
         g2l_graph[entry.channel] = tuple([copied[channel] for channel in entry.wc_dependents])
@@ -40,13 +41,16 @@ def create_agent(agent_class, t_init, ac_table, wc_table, var_names, logger):
         if entry.sync:
             sync_channels.append(copied[entry.channel])
     sync_channels = tuple(sync_channels)
+
     # create channel network/event schedule
     network = ChannelNetwork(channel_dict, dep_graph, l2g_graph, g2l_graph, sync_channels, t_init)
+
     # create state object
     if logger is not None:
         state = State(var_names, logger)
     else:
         state = State(var_names)
+
     # create agent
     return agent_class(t_init, state, network)
 
@@ -56,16 +60,19 @@ def create_world(t_init, wc_table, var_names):
     Factory for world entities. World channels are not copied.
 
     """
-    # build channel dependency graph and lookup table for scheduler
+    # build channel dependency graph and global event schedule
     channel_dict = {}
     dep_graph = {}
     for name, entry in wc_table.items():
         channel_dict[name] = entry.channel
         dep_graph[entry.channel] = tuple([channel for channel in entry.wc_dependents])
+
     # create channel network/event schedule
     network = ChannelNetwork(channel_dict, dep_graph, None, None, [], t_init)
+
     # create state object
     state = State(var_names)
+
     # create world
     return World(t_init, state, network)
 
@@ -83,18 +90,29 @@ class ChannelNetwork(object):
     smallest element. The min element is cached until the queue is updated to
     improve lookup efficiency.
 
+    Attributes:
+        channel_dict    (dict: name -> channel)
+        timetable       (dict: channel -> float)
+        dep_graph       (dict: channel -> tuple of channels)
+        l2g_graph       (dict: channel -> tuple of channels)
+        g2l_graph       (dict: channel -> tuple of channels)
+        sync_channels   (tuple of channels)
+
+    NOTE: we could switch to an indexed heap priority queue...
+
     """
     def __init__(self, channel_dict, dep_graph, l2g_graph=None, g2l_graph=None, sync_channels=[], t_init=float('-inf')):
-        self.channel_dict = channel_dict #dict: name -> channel
-        self.timetable = {channel:t_init for channel in channel_dict.values()} #dict: channel -> eventtime
-        self.dep_graph = dep_graph #dict: channel-> tuple of channels (immutable)
-        self.l2g_graph = l2g_graph #dict: channel-> tuple of channels
-        self.g2l_graph = g2l_graph #dict: channel-> tuple of channels
-        self.sync_channels = sync_channels #tuple
+        self.channel_dict = channel_dict
+        self.timetable = {channel:t_init for channel in channel_dict.values()}
+        self.dep_graph = dep_graph
+        self.l2g_graph = l2g_graph
+        self.g2l_graph = g2l_graph
+        self.sync_channels = sync_channels
         self.__next_event_time = None
         self.__next_channel = None
         self.__updated = True
         #NOTE: could use a list of all channels to help enforce an ordering for tie-breaking...
+        #      or use 2-tuples as priority keys (event_time, index)
 
     def __contains__(self, channel):
         return channel in self.timetable
@@ -146,17 +164,17 @@ class ChannelNetwork(object):
 
         # create a new network with cloned channels and dependency graphs
         other = ChannelNetwork(channel_dict, dep_graph, l2g_graph, g2l_graph, sync_channels)
+
         # copy over the event times
         for channel in self.timetable:
             other.timetable[orig_copied[channel]] = self.timetable[channel]
 
-        # private data (if set)
-        if self.__next_event_time:
+        # cached data (if available)
+        if self.__next_event_time is not None:
             other.__next_channel = orig_copied[self.__next_channel]
             other.__next_event_time = self.__next_event_time
             other.__updated = False
         return other
-
 
 
 
@@ -171,7 +189,7 @@ class Entity(object): #Abstract
     """
     def __init__(self, time, state, network):
         if any([network[channel] < time for channel in network]):
-            raise SimulationError("Some channel's event time precedes the entity's clock.")
+            raise SimulationError("Cannot create entity: some channel's event time precedes the entity's clock.")
         self.clock = time
         self.state = state
         self.network = network
@@ -185,31 +203,24 @@ class Entity(object): #Abstract
     def stop(self):
         self.is_enabled = False
 
-    def scheduleAllChannels(self, cargo, source=None):
-        tmin = float('inf')
-        cmin = None
-        for channel in self.network:
-            event_time = channel.scheduleEvent(self, cargo, self.clock, source)
-            if event_time < self.clock:
-                raise SchedulingError(self, channel, self.clock, event_time)
-            elif event_time < tmin:
-                tmin = event_time
-                cmin = channel
-            self.network[channel] = event_time
-        return tmin
-
     def fireChannel(self, name, cargo, t_fire, queue, source=None):
-        # NOTE: need to supply the firing time
-        if t_fire < self.clock:
-            raise SimulationError("Attempted to fire an event in the past!")
+        """
+        Fire a channel "manually". Rescheduling dependencies will be invoked if
+        the channel modifies the entity. However, cross-dependencies (i.e., l2g
+        or g2l) will not be invoked.
+        NOTE: need to supply the firing time.
+
+        """
         channel = self.network.channel_dict[name]
+        if t_fire < self.clock:
+            raise FiringError(channel, self.clock, t_fire)
         is_mod = channel.fireEvent(self, cargo, self.clock, t_fire, queue)
         self.clock = t_fire
 
         # reschedule channel that just fired
         event_time = channel.scheduleEvent(self, cargo, self.clock, source)
         if event_time < self.clock:
-            raise SchedulingError(self, channel, self.clock, event_time)
+            raise SchedulingError(channel, self.clock, event_time)
         self.network[channel] = event_time
 
         # reschedule dependent channels
@@ -219,19 +230,34 @@ class Entity(object): #Abstract
                 # are sync channels that have yet to fire...
                 event_time = dependent.scheduleEvent(self, cargo, self.clock, source)
                 if event_time < self.clock:
-                    raise SchedulingError(self, dependent, self.clock, event_time)
+                    raise SchedulingError(dependent, self.clock, event_time)
                 self.network[dependent] = event_time
+
+    def scheduleAllChannels(self, cargo, source=None):
+        tmin = float('inf')
+        cmin = None
+        for channel in self.network:
+            event_time = channel.scheduleEvent(self, cargo, self.clock, source)
+            if event_time < self.clock:
+                raise SchedulingError(channel, self.clock, event_time)
+            elif event_time < tmin:
+                tmin = event_time
+                cmin = channel
+            self.network[channel] = event_time
+        return tmin
 
     def fireNextChannel(self, cargo, queue):
         cmin, tmin = self.network.getMin()
         # fire channel
         self.is_modified = cmin.fireEvent(self, cargo, self.clock, tmin, queue)
         self.clock = tmin
+
         # reschedule channel that just fired
         event_time = cmin.scheduleEvent(self, cargo, self.clock, None)
         if event_time < self.clock:
-            raise SchedulingError(self, cmin, self.clock, event_time)
+            raise SchedulingError(cmin, self.clock, event_time)
         self.network[cmin] = event_time
+
         # remember channel that just fired
         self._prev_channel = cmin
 
@@ -241,11 +267,11 @@ class Entity(object): #Abstract
                 # reschedule dependent channel
                 event_time = dependent.scheduleEvent(self, cargo, self.clock, source)
                 if event_time < self.clock:
-                    raise SchedulingError(self, dependent, self.clock, event_time)
+                    raise SchedulingError(dependent, self.clock, event_time)
                 self.network[dependent] = event_time
 
     def _get_next_event_time(self):
-        cmin, tmin = self.network.getMin() # NOTE:network does a linear scan... we could switch to an ipq
+        cmin, tmin = self.network.getMin()
         return tmin
     next_event_time = property(fget=_get_next_event_time)
 
@@ -255,7 +281,7 @@ class World(Entity):
     World entity.
 
     """
-    def rescheduleL2G(self, cargo, source_agent):
+    def crossScheduleL2G(self, cargo, source_agent):
         """
         Takes as input the agent who fired the offending event.
         Reschedules affected world channels.
@@ -267,12 +293,12 @@ class World(Entity):
                 # reschedule world channel that depends on source agent
                 event_time = world_channel.scheduleEvent(self, cargo, self.clock, source_agent)
                 if event_time < self.clock:
-                    raise SchedulingError(self, world_channel, self.clock, event_time)
+                    raise SchedulingError(world_channel, self.clock, event_time)
                 self.network[world_channel] = event_time
 
-    def rescheduleL2GAsync(self, cargo, world_channels):
+    def crossScheduleL2GAsync(self, cargo, world_channels):
         """
-        Different version of rescheduleAux for the Asynchronous Method algorithm.
+        Different version for the Asynchronous Method algorithm.
         This takes the collection of world channels to reschedule as input
         rather than the agents who fired the offending events.
 
@@ -280,7 +306,7 @@ class World(Entity):
         for world_channel in world_channels:
             event_time = world_channel.scheduleEvent(self, cargo, self.clock, source_agent)
             if event_time < self.clock:
-                raise SchedulingError(self, world_channel, self.clock, event_time)
+                raise SchedulingError(world_channel, self.clock, event_time)
             self.network[world_channel] = event_time
 
 
@@ -300,12 +326,14 @@ class Agent(Entity):
         other = Agent(time, state, network)
 
         # Get the channel that is firing right now
-        channel, event_time = other.network.getMin() #NOTE: this could break when there is a tie: works because we copy the cached min channel from self's network
-        # Do bookkeeping for the new agent
+        # NOTE: this could fail when there is a tie for the min event (see ChannelNetwork), yielding the wrong channel.
+        #       It works for now because we mirrored the cached min channel from self's network
+        channel, event_time = other.network.getMin()
+
+        # Bookkeeping for the new agent
         other._prev_channel = channel
         other.clock = event_time
-        # Assume we always want to invoke dependencies on the new agent
-        other.is_modified = True
+        other.is_modified = True #Assume we always want to invoke dependencies on the new agent. It doesn't hurt anyway.
 
         # New agents are bound to their parent before they are added to the population.
         # This marker should be removed when the new agent is introduced.
@@ -323,7 +351,7 @@ class Agent(Entity):
         prev = self._prev_channel
         event_time = prev.scheduleEvent(self, cargo, self.clock, source)
         if event_time < self.clock:
-            raise SchedulingError(self, prev_channel, self.clock, event_time)
+            raise SchedulingError(prev_channel, self.clock, event_time)
         self.network[prev] = event_time
 
     def synchronize(self, tbarrier, world, queue, source=None):
@@ -337,14 +365,14 @@ class Agent(Entity):
             if is_mod:
                 for dependent in self.network.dep_graph[channel]:
                     # NOTE:some of these rescheds may be redundant if the dependents
-                    # are gap channels that are still pending to fire...
+                    # are gap channels that are still pending to fire in the outer loop...
                     event_time = dependent.scheduleEvent(self, world, self.clock, source)
                     if event_time < self.clock:
-                        raise SchedulingError(self, dependent, self.clock, event_time)
+                        raise SchedulingError(dependent, self.clock, event_time)
                     self.network[dependent] = event_time
         self.clock = tbarrier
 
-    def rescheduleG2L(self, cargo, world):
+    def crossScheduleG2L(self, cargo, world):
         """
         Takes as input the world entity which fired an offending event.
         Reschedules affected agent channels.
@@ -356,7 +384,7 @@ class Agent(Entity):
                 # reschedule world-dependent local channels
                 event_time = agent_channel.scheduleEvent(self, cargo, self.clock, world)
                 if event_time < self.clock:
-                    raise SchedulingError(self, agent_channel, self.clock, event_time)
+                    raise SchedulingError(agent_channel, self.clock, event_time)
                 self.network[agent_channel] = event_time
 
     def getDependentChannels(self):
@@ -384,15 +412,13 @@ class LineageAgent(Agent):
 
         # Get the channel that is firing right now
         channel, event_time = other.network.getMin()
-        # Do bookkeeping for the new agent
+        # Bookkeeping for the new agent
         other._prev_channel = channel
         other.clock = event_time
-        # Assume we always want to invoke dependencies on the new agent
-        other.is_modified = True
+        other.is_modified = True # Assume we always want to invoke dependencies on the new agent
 
-        # New agents are bound to their parent before they are added to the population.
-        # This marker should be removed when the new agent is introduced.
-        other._parent = self
+        # This marker should be removed when the new agent is introduced into the population.
+        other._parent = self #bind child to parent
 
         # Branch datalog into two new nodes
         l_node, r_node = self.node.branch()
@@ -434,10 +460,16 @@ class LineageAgent(Agent):
 
 class AgentQueue(object):
     """
-    Holds a heap of agents arranged by birth time.
+    A queue of agents to be introduced or removed from the population at
+    specified times according to the specified action. Agents are retrieved in
+    time-stamp order.
+
+    Constants:
+        ADD_AGENT
+        DELETE_AGENT
 
     Attributes:
-        heap (list): binary heap holding parent and child agents
+        heap (list): binary heap holding agents
 
     """
     ADD_AGENT = 1
@@ -453,10 +485,6 @@ class AgentQueue(object):
             return self.priority_key < other.priority_key
 
     def __init__(self):
-        """
-        Create an empty queue.
-
-        """
         self.heap = []
 
     def __len__(self):
