@@ -8,184 +8,326 @@ Copyright:   (c) Nezar Abdennur 2012
 """
 #!/usr/bin/env python
 
-import heapq
+import collections
+
+class IPQEntry(object):
+    def __init__(self, item, pkey):
+        self.item = item
+        self.pkey = pkey
+
+    def __lt__(self, other):
+        return self.pkey < other.pkey
+
+    def __eq__(self, other):
+        return self.pkey == other.pkey
+
+    def __repr__(self):
+        return "PQDEntry(" + str(self.item) + ": " + str(self.pkey) + ")"
 
 #TODO: We may need to consider the case of equal priority values if
 #      we wish to enforce an ordering on channels with equal event times.
-class IndexedPriorityQueue(object):
+
+# One option is to override __lt__ for tie-breaking rules.
+#
+# We could also use tuples/lists for comparison [priority_key, ordering_index]
+# where each item gets a unique ordering index (e.g. pre-specified or based on
+# when it is inserted). Python sequence comparison will automatically use the
+# second element when the first compares equal.
+
+
+class IndexedPriorityQueue(collections.MutableMapping):
     """
     Implements Indexed Priority Queue data structure as described in:
     Gibson and Bruck. J. Phys. Chem. A, Vol. 104, No. 9, 2000.
 
     Priority values and items are stored in a binary MIN-heap, implemented as a
-    python list (heapq module). The constructor builds an initial heap. Entries
-    can be added. Conceptually, entries are pairs of the form [item, key].
-    Here, the highest priority item is the one with the *smallest* key.
-
-    The class does not support popping single entries out. One can access the
-    min entry but not remove it, and one can also update an existing entry's
-    priority key or replace the item.
+    python list. The constructor builds an initial heap. Entries can be added.
+    Conceptually, entries are pairs of the form [item, key]. Here, the highest
+    priority item is the one with the *smallest* key.
 
     """
-    class Entry(object):
-        def __init__(self, item, priority_key):
-            self.priority_key = priority_key
-            self.item = item
+    __slots__ = ('heap', 'nodefinder','cmp')
 
-        def __lt__(self, other):
-            return self.priority_key < other.priority_key
-
-        def __gt__(self, other):
-            return self.priority_key > other.priority_key
-
-    def __init__(self, items, priorities):
-        """
-        Heapifies an array of tree nodes and creates the index structure.
-        Each node stores an Entry object [priority, item].
-
-        Args:
-            items (list): items associated with a priority-determining key
-            priorities (list): comparable values
-
-        Notes:
-            Index structure is a hash table mapping 'item' -> location of entry
-            containing 'item' in the heap (i.e. node or index).
-            WARNING: Each item must be unique!
-
-        """
+    def __init__(self, *args):
         self.heap = []
-        for item, priority_key in zip(items, priorities):
-            entry = IndexedPriorityQueue.Entry(item, priority_key)
-            self.heap.append(entry)
-        heapq.heapify(self.heap)
+        self.nodefinder = {}
+        self.cmp = IPQEntry
+        if args:
+            d = dict(*args)
+            for dkey, pkey in d.items():
+                self[dkey] = pkey
+            self._heapify()
 
-        # WARNING: Each item must be unique!!!
-        self._index_of = {}
-        i = 0;
-        for entry in self.heap:
-            self._index_of[entry.item] = i
-            i += 1
-
-    def peekMin(self):
+    def __len__(self):
         """
-        Access the smallest entry.
+        Return number of items in the PQD.
 
         """
-        min_entry = self.heap[0]
-        return min_entry.priority_key, min_entry.item
+        return len(self.nodefinder)
 
-    def add(self, item, priority_key):
+    def __contains__(self, dkey):
         """
-        Add a new entry while maintaining the heap invariant and the index
-        structure.
+        Return True if dkey is in the PQD else return False.
 
         """
-        entry = IndexedPriorityQueue.Entry(item, priority_key)
-        index = len(self.heap)
-        self.heap.append(entry)
-        self._index_of[item] = index
-        self._bubbleUp(index)
+        return dkey in self.nodefinder
 
-    def update(self, item, new_key):
+    def __iter__(self):
         """
-        Update an existing entry while maintaining the heap invariant and the
-        index structure.
+        Return an iterator over the keys of the PQD.
 
         """
-        index = self._index_of[item]
-        entry = self.heap[index]
-        entry.priority_key = new_key
-        self._updateReheapify(index)
+        return self.nodefinder.__iter__()
 
-    def replace(self, old_item, new_item, new_key=None):
+    def __getitem__(self, dkey):
+        """
+        Return the priority of dkey. Raises a KeyError if not in the PQD.
+
+        """
+        return self.heap[self.nodefinder[dkey]].pkey #raises KeyError
+
+    def __setitem__(self, dkey, pkey):
+        """
+        Set priority key of item dkey.
+
+        """
+        heap = self.heap
+        finder = self.nodefinder
+        try:
+            pos = finder[dkey]
+        except KeyError:
+            # add new entry
+            n = len(self.heap)
+            self.heap.append(self.cmp(dkey, pkey))
+            self.nodefinder[dkey] = n
+            self._swim(n)
+        else:
+            # update existing entry
+            heap[pos].pkey = pkey
+            parent_pos = (pos - 1) >> 1
+            child_pos = 2*pos + 1
+            if parent_pos > 0 and heap[pos] < heap[parent_pos]:
+                self._swim(pos)
+            elif child_pos < len(heap):
+                right_pos = child_pos + 1
+                if right_pos < len(heap) and not heap[child_pos] < heap[right_pos]:
+                    child_pos = right_pos
+                if heap[child_pos] < heap[pos]:
+                    self._sink(pos)
+
+    def __delitem__(self, dkey):
+        """
+        Remove item dkey. Raises a KeyError if dkey is not in the PQD.
+
+        """
+        heap = self.heap
+        finder = self.nodefinder
+
+        # Remove very last item and place in vacant spot. Let the new item
+        # sink until it reaches its new resting place.
+        try:
+            pos = finder.pop(dkey)
+        except KeyError:
+            raise
+        else:
+            entry = heap[pos]
+            last = heap.pop(-1)
+            if entry is not last:
+                heap[pos] = last
+                finder[last.item] = pos
+                parent_pos = (pos - 1) >> 1
+                child_pos = 2*pos + 1
+                if parent_pos > 0 and heap[pos] < heap[parent_pos]:
+                    self._swim(pos)
+                elif child_pos < len(heap):
+                    right_pos = child_pos + 1
+                    if right_pos < len(heap) and not heap[child_pos] < heap[right_pos]:
+                        child_pos = right_pos
+                    if heap[child_pos] < heap[pos]:
+                        self._sink(pos)
+            del entry
+
+    def __copy__(self):
+        """
+        Return a new PQD with the same dkeys (shallow copied) and priority keys.
+
+        """
+        #TODO: deep copy priority keys? shouldn't these always be int/float anyway?
+        from copy import copy
+        other = PriorityQueueDict()
+        other.heap = [copy(entry) for entry in self.heap]
+        other.nodefinder = copy(self.nodefinder)
+        return other
+
+    copy = __copy__
+    __eq__ = collections.MutableMapping.__eq__
+    __ne__ = collections.MutableMapping.__ne__
+    get = collections.MutableMapping.get
+    keys = collections.MutableMapping.keys
+    values = collections.MutableMapping.values
+    items = collections.MutableMapping.items
+    clear = collections.MutableMapping.clear
+    setdefault = collections.MutableMapping.setdefault
+    __marker = object()
+
+    def pop(self, dkey, default=__marker):
+        """
+        If key is in the PQD, remove it and return its priority key, else return
+        default. If default is not given and dkey is not in the PQD, a KeyError
+        is raised.
+
+        """
+        heap = self.heap
+        finder = self.nodefinder
+
+        try:
+            pos = finder.pop(dkey)
+        except KeyError:
+            if default is self.__marker:
+                raise
+            return default
+        else:
+            delentry = heap[pos]
+            last = heap.pop(-1)
+            if delentry is not last:
+                heap[pos] = last
+                finder[last.item] = pos
+                parent_pos = (pos - 1) >> 1
+                child_pos = 2*pos + 1
+                if parent_pos > 0 and heap[pos] < heap[parent_pos]:
+                    self._swim(pos)
+                elif child_pos < len(heap):
+                    right_pos = child_pos + 1
+                    if right_pos < len(heap) and not heap[child_pos] < heap[right_pos]:
+                        child_pos = right_pos
+                    if heap[child_pos] < heap[pos]:
+                        self._sink(pos)
+            pkey = delentry.pkey
+            del delentry
+            return pkey
+
+    def popitem(self):
+        """
+        Extract top priority item. Raises KeyError if PQD is empty.
+
+        """
+        try:
+            last = self.heap.pop(-1)
+        except IndexError:
+            raise KeyError
+        else:
+            if self.heap:
+                entry = self.heap[0]
+                self.heap[0] = last
+                self.nodefinder[last.item] = 0
+                self._sink(0)
+            else:
+                entry = last
+            self.nodefinder.pop(entry.item)
+            return entry.item, entry.pkey
+
+    def add(self, dkey, pkey):
+        """
+        Add a new item. Raises KeyError if item is already in the PQD.
+
+        """
+        if dkey in self.nodefinder:
+            raise KeyError
+        self[dkey] = pkey
+
+    def updateitem(self, dkey, new_pkey):
+        """
+        Update the priority key of an existing item. Raises KeyError if item is
+        not in the PQD.
+
+        """
+        if dkey not in self.nodefinder:
+            raise KeyError
+        self[dkey] = new_pkey
+
+    def replaceitem(self, old_item, new_item, new_pkey=None):
         """
         Replace the item of an existing entry. Optionally, change the priority
         while maintaining the heap invariant and the index structure.
 
         """
-        index = self._index_of[old_item]
-        entry = self.heap[index]
+        if old_item not in self.nodefinder:
+            raise KeyError
+        pos = self.nodefinder[old_item]
+        entry = self.heap[pos]
         entry.item = new_item
-        self._index_of[new_item] = index
-        del self._index_of[old_item]
-        if new_key is not None:
-            entry.priority_key = new_key
-            self._updateReheapify(index)
+        self.nodefinder[new_item] = pos
+        del self.nodefinder[old_item]
+        if new_pkey is not None:
+            self[new_item] = new_pkey
 
-    def _swap(self, indexA, indexB):
-        entryA = self.heap[indexA]
-        entryB = self.heap[indexB]
-        self.heap[indexA], self.heap[indexB] = entryB, entryA
-        self._index_of[entryA.item] = indexB
-        self._index_of[entryB.item] = indexA
+    def peek(self):
+        """
+        Get top priority item.
 
-    def _bubbleUp(self, index):
-        parent_index = (index-1)//2
-        while parent_index >= 0:
-            entry = self.heap[index]
-            parent = self.heap[parent_index]
-            if entry < parent:
-                self._swap(index, parent_index)
-                index = parent_index
-                parent_index = (index-1)//2
-            else:
-                break
+        """
+        try:
+            entry = self.heap[0]
+        except IndexError:
+            raise KeyError
+        return entry.item, entry.pkey
 
-    def _updateReheapify(self, index):
-        # bubble up
-        parent_index = (index-1)//2
-        has_parent = parent_index >= 0
-        while has_parent:
-            entry = self.heap[index]
-            parent = self.heap[parent_index]
-            if entry < parent:
-                self._swap(index, parent_index)
-                index = parent_index
-                parent_index = (index-1)//2
-                has_parent = parent_index >= 0
-            else:
-                break
+    def _heapify(self):
+        n = len(self.heap)
+        for pos in reversed(range(n//2)):
+            self._sink(pos)
 
-        # bubble down
-        num_nodes = len(self.heap)-1
-        l_child_index = 2*index+1
-        r_child_index = 2*index+2
-        has_child = l_child_index <= num_nodes
-        while has_child:
-            l_child = self.heap[l_child_index]
-            try:
-                r_child = self.heap[r_child_index]
-            except(IndexError):
-                min_child_index = l_child_index
-            else:
-                min_child_index = l_child_index if (l_child < r_child) else r_child_index
-            min_child = self.heap[min_child_index]
-            entry = self.heap[index]
-            if entry > min_child:
-                self._swap(index, min_child_index)
-                index = min_child_index
-                l_child_index = 2*index+1
-                r_child_index = 2*index+2
-                has_child = l_child_index <= num_nodes
-            else:
-                break
+    def _sink(self, top=0):
+        heap = self.heap
+        finder = self.nodefinder
 
-    def _printHeap(self):
-        for entry in self.heap:
-            print(entry.priority_key, entry.item)
+        # Peel off top item
+        pos = top
+        entry = heap[pos]
 
-    def _sortedKeys(self):
-        h = self.heap[:]
-        keys = []
-        while h:
-            keys.append(heapq.heappop(h).priority_key)
-        return keys
+        # Sift up a trail of child nodes
+        child_pos = 2*pos + 1
+        while child_pos < len(heap):
+            # Choose the index of smaller child.
+            right_pos = child_pos + 1
+            if right_pos < len(heap) and not heap[child_pos] < heap[right_pos]:
+                child_pos = right_pos
 
+            # Move the smaller child up.
+            child_entry = heap[child_pos]
+            heap[pos] = child_entry
+            finder[child_entry.item] = pos
 
+            pos = child_pos
+            child_pos = 2*pos + 1
 
+        # We are now at a leaf. Put item there and let it swim until it reaches
+        # its new resting place.
+        heap[pos] = entry
+        finder[entry.item] = pos
+        self._swim(pos, top)
 
+    def _swim(self, pos, top=0):
+        heap = self.heap
+        finder = self.nodefinder
 
+        # Remove item from its place
+        entry = heap[pos]
 
+        # Bubble item up by sifting parents down until finding a place it fits.
+        while pos > top:
+            parent_pos = (pos - 1) >> 1
+            parent_entry = heap[parent_pos]
+            if entry < parent_entry:
+                heap[pos] = parent_entry
+                finder[parent_entry.item] = pos
+                pos = parent_pos
+                continue
+            break
+
+        # Put item in its new place
+        heap[pos] = entry
+        finder[entry.item] = pos
 
 
 
@@ -198,7 +340,7 @@ class IndexedPriorityQueue(object):
 #-------------------------------------------------------------------------------
 def _test_ipq():
     import random
-    from event import AgentChannel
+    from cps.channel import AgentChannel
 
     # Test IPQ
     #----------
@@ -209,22 +351,22 @@ def _test_ipq():
         priorities.append(random.uniform(0,m))
         items.append(AgentChannel())
 
-    pq = IndexedPriorityQueue(items, priorities)
+    pq = IndexedPriorityQueue(zip(items, priorities))
 
-    pq.update(items[random.randint(0,n-1)], random.uniform(0,m))
-    pq.update(items[random.randint(0,n-1)], random.uniform(0,m))
-    pq.update(items[random.randint(0,n-1)], random.randint(0,m))
-    pq.update(items[random.randint(0,n-1)], random.randint(0,m))
-    pq.update(items[random.randint(0,n-1)], random.randint(0,m))
+    pq.updateitem(items[random.randint(0,n-1)], random.uniform(0,m))
+    pq.updateitem(items[random.randint(0,n-1)], random.uniform(0,m))
+    pq.updateitem(items[random.randint(0,n-1)], random.randint(0,m))
+    pq.updateitem(items[random.randint(0,n-1)], random.randint(0,m))
+    pq.updateitem(items[random.randint(0,n-1)], random.randint(0,m))
 
     for entry in pq.heap:
-        print(entry.priority_key)
+        print(entry.pkey)
     print()
 
-    t = pq._sortedKeys()
-    for elem in t:
-        print(elem)
-    assert(t == sorted(t))
+##    t = pq._sortedKeys()
+##    for elem in t:
+##        print(elem)
+##    assert(t == sorted(t))
 
 if __name__ == '__main__':
     _test_ipq()
