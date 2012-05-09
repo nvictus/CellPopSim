@@ -500,6 +500,7 @@ class AgentQueue(object):
             if agent._parent:
                 raise SimulationError("The agent queued for deletion is not in the population.")
             else:
+                agent.stop()
                 heapq.heappush( self.heap, AgentQueue.Entry(priority_key, agent, action) )
         else:
             raise SimulationError("Invalid action.")

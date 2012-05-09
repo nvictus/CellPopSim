@@ -11,6 +11,7 @@ Copyright:   (c) Nezar Abdennur 2012
 
 from cps.entity import World, Agent, LineageAgent, AgentQueue, create_agent, create_world
 from cps.misc import IndexedPriorityQueue
+from cps.exception import SimulationError
 import random
 
 class BaseSimulator(object):
@@ -32,6 +33,7 @@ class BaseSimulator(object):
         # keep count of agents
         self.num_agents = model.init_num_agents
         self.max_num_agents = model.max_num_agents
+        self.theoretical_size = self.num_agents
 
         # create world entity
         self.world = create_world(tstart,
@@ -103,7 +105,7 @@ class FEMethodSimulator(BaseSimulator):
         for agent in self.agents:
             event_times.append(agent.next_event_time)
             entities.append(agent)
-        self.timetable = IndexedPriorityQueue(entities, event_times)
+        self.timetable = IndexedPriorityQueue(zip(entities, event_times))
 
     def runSimulation(self, tstop):
         """
@@ -116,19 +118,19 @@ class FEMethodSimulator(BaseSimulator):
         world = self.world
 
         # get earliest event time and entity
-        tmin, emin = self.timetable.peekMin()
+        emin, tmin = self.timetable.peek()
 
         while (tmin <= tstop):
             if emin is world:
                 # synchronize agents with the world (fire sync channels)
                 for agent in agents:
                     agent.synchronize(tmin, world, q)
-                    self.timetable.update(agent, agent.next_event_time)
+                    self.timetable.updateitem(agent, agent.next_event_time)
 
                 # next world event
                 world.fireNextChannel(agents, q)
                 world.rescheduleDependentChannels(agents)
-                self.timetable.update(world, world.next_event_time)
+                self.timetable.updateitem(world, world.next_event_time)
                 if not world.is_enabled: # terminate simulation prematurely
                     return
 
@@ -136,31 +138,32 @@ class FEMethodSimulator(BaseSimulator):
                 if world.is_modified:
                     for agent in agents:
                         agent.crossScheduleG2L(world, world)
-                        self.timetable.update(agent, agent.next_event_time)
+                        self.timetable.updateitem(agent, agent.next_event_time)
 
             elif emin.is_enabled:      #(emin is an agent)
                 # next agent event
                 emin.fireNextChannel(world, q)
                 emin.rescheduleDependentChannels(world)
-                self.timetable.update(emin, emin.next_event_time)
+                self.timetable.updateitem(emin, emin.next_event_time)
 
                 # reschedule world channels affected by agent event
                 if emin.is_modified:
                     world.crossScheduleL2G(agents, emin)
-                    self.timetable.update(world, world.next_event_time)
+                    self.timetable.updateitem(world, world.next_event_time)
 
              # add/substitute new agents
             self._processAgentQueue(tmin)
 
             # get earliest event and entity
-            tmin, emin = self.timetable.peekMin()
+            emin, tmin = self.timetable.peek()
         #endwhile
 
     def _processAgentQueue(self, tbarrier):
         while self._agent_queue:
-            action, new_agent = self._agent_queue.dequeue()
+            action, agent = self._agent_queue.dequeue()
 
             if action == AgentQueue.ADD_AGENT:
+                new_agent = agent
                 parent = new_agent._parent
 
                 # Finalize the event which added this agent to the queue
@@ -176,6 +179,7 @@ class FEMethodSimulator(BaseSimulator):
                     self.agents.append(new_agent)
                     self.timetable.add(new_agent, new_agent.next_event_time)
                     self.num_agents += 1
+                    self.theoretical_size += 1
                 else:
                     # CONSTANT-NUMBER MODE: Substitute agent into population
 
@@ -183,11 +187,12 @@ class FEMethodSimulator(BaseSimulator):
                     target = self.agents[index]
                     # substitute in agent list and ipq
                     self.agents[index] = new_agent
-                    self.timetable.replace(target, new_agent, new_agent.next_event_time)
+                    self.timetable.replaceitem(target, new_agent, new_agent.next_event_time)
                     del target
+                    self.theoretical_size += self.num_agents/self.theoretical_size
 
             elif action == AgentQueue.DELETE_AGENT:
-                target = item
+                target = agent
 
                 if self.num_agents < self.max_num_agents:
                     # NORMAL MODE: Remove agent from population
@@ -197,8 +202,9 @@ class FEMethodSimulator(BaseSimulator):
                     except ValueError:
                         raise SimulationError("Agent not found.")
 
-                    self.timetable.remove(target) #TODO: implement this!!!
+                    self.timetable.pop(target)
                     self.num_agents -= 1
+                    self.theoretical_size -= 1
 
                     if self.num_agents == 0:
                         raise SimulationError("The population crashed!")
@@ -206,6 +212,9 @@ class FEMethodSimulator(BaseSimulator):
                 else:
                     # CONSTANT-NUMBER MODE: Replace with a randomly chosen
                     # agent
+
+                    if self.num_agents == 1:
+                        raise SimulationError
 
                     try:
                         i_target = self.agents.index(target)
@@ -218,10 +227,11 @@ class FEMethodSimulator(BaseSimulator):
                         i_source = random.randint(0, self.num_agents-1)
 
                     # replace target agent
-                    new_agent = self.agents[i_source].clone()
+                    new_agent = self.agents[i_source].clone(); new_agent._parent = None
                     self.agents[i_target] = new_agent
-                    self.timetable.replace(target, new_agent, new_agent.next_event_time)
+                    self.timetable.replaceitem(target, new_agent, new_agent.next_event_time)
                     del target
+                    self.theoretical_size -= self.num_agents/self.theoretical_size
 
 
 
@@ -270,7 +280,8 @@ class AsyncMethodSimulator(BaseSimulator):
 
                         agent.rescheduleDependentChannels(world)
                         clock = agent.next_event_time
-                    agent.synchronize(tsync, world, q)
+                    if agent.is_enabled:
+                        agent.synchronize(tsync, world, q)
 
             # add/substitute new agents
             self._processAgentQueue(tsync)
@@ -296,21 +307,23 @@ class AsyncMethodSimulator(BaseSimulator):
         replaced = set()
 
         while self._agent_queue:
-            action, new_agent = self._agent_queue.dequeue()
+            action, agent = self._agent_queue.dequeue()
 
             if action == AgentQueue.ADD_AGENT:
+                new_agent = agent
                 parent = new_agent._parent
 
                 if self.num_agents < self.max_num_agents:
                     # NORMAL MODE: Add agent to population
 
                     # Update child agent's event schedule
-                    new_agent.finalizePrevEvent()
+                    new_agent.finalizePrevEvent() #removes _parent reference
                     new_agent.reschedulePrevChannel(self.world)
                     new_agent.rescheduleDependentChannels(self.world)
 
                     # Add agent
                     self.agents.append(new_agent)
+                    self.theoretical_size += 1
                     self.num_agents += 1
 
                 elif parent not in replaced:
@@ -325,6 +338,7 @@ class AsyncMethodSimulator(BaseSimulator):
                     index = random.randint(0, len(self.agents)-1)
                     replaced.add(self.agents[index])
                     self.agents[index] = new_agent
+                    self.theoretical_size += self.num_agents/self.theoretical_size
 
                 else:
                     # This agent's parent has been replaced by another agent
@@ -332,7 +346,7 @@ class AsyncMethodSimulator(BaseSimulator):
                     del new_agent
 
             elif action == AgentQueue.DELETE_AGENT:
-                target = item
+                target = agent
 
                 if self.num_agents < self.max_num_agents:
                     # NORMAL MODE: Remove agent from population
@@ -341,14 +355,19 @@ class AsyncMethodSimulator(BaseSimulator):
                         self.agents.remove(target)
                     except ValueError:
                         raise SimulationError("Agent not found.")
+
+                    self.theoretical_size -= 1
                     self.num_agents -= 1
 
                     if self.num_agents == 0:
-                        raise SimulationError("The population crashed!")
+                        raise SimulationError("The sample population crashed!")
 
                 elif target not in replaced:
                     # CONSTANT-NUMBER MODE: Replace deleted agent with a copy
                     # of a randomly selected agent
+
+                    if self.num_agents == 1:
+                        raise SimulationError
 
                     try:
                         i_target = self.agents.index(target)
@@ -361,8 +380,11 @@ class AsyncMethodSimulator(BaseSimulator):
                         i_source = random.randint(0, self.num_agents-1)
 
                     # replace target agent
-                    self.agents[i_target] = self.agents[i_source].clone()
+                    new_agent = self.agents[i_source].clone(); new_agent._parent = None
+                    self.agents[i_target] = new_agent
                     del target
+
+                    self.theoretical_size -= self.num_agents/self.theoretical_size
 
                 else:
                     # This agent has already been replaced --> discard

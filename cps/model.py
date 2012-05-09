@@ -101,7 +101,7 @@ class Model(object):
 
         """
         if name is None:
-            name = channel.__class__
+            name = str(channel.__class__)
         if name in self.agent_channel_table:
             raise ValueError("A channel with the same name has already been included in the model.")
         elif not isinstance(channel, AgentChannel):
