@@ -68,7 +68,7 @@ def create_world(t_init, wc_table, var_names):
         dep_graph[entry.channel] = tuple([channel for channel in entry.wc_dependents])
 
     # create channel network/event schedule
-    network = ChannelNetwork(channel_dict, dep_graph, None, None, [], t_init)
+    network = ChannelNetwork(channel_dict, dep_graph, t_init=t_init)
 
     # create state object
     state = State(var_names)
@@ -101,7 +101,7 @@ class ChannelNetwork(object):
     NOTE: we could switch to an indexed heap priority queue...
 
     """
-    def __init__(self, channel_dict, dep_graph, l2g_graph=None, g2l_graph=None, sync_channels=[], t_init=float('-inf')):
+    def __init__(self, channel_dict, dep_graph, l2g_graph=None, g2l_graph=None, sync_channels=(), t_init=float('-inf')):
         self.channel_dict = channel_dict
         self.timetable = {channel:t_init for channel in channel_dict.values()}
         self.dep_graph = dep_graph
