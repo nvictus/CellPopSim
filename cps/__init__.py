@@ -24,6 +24,10 @@ from cps.state import Recorder, save_snapshot, save_lineage
 from cps.simulator import FEMethodSimulator, AsyncMethodSimulator
 from cps.model import Model
 
+from cps.entity import AgentQueue
+ADD_AGENT = AgentQueue.ADD_AGENT
+DELETE_AGENT = AgentQueue.DELETE_AGENT
+del AgentQueue
 
 __author__   = '%s <%s>\n' % ('Nezar Abdennur', 'nabdennur@gmail.com')
 __license__  = 'ISC'
