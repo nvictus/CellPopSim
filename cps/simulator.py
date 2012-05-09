@@ -16,18 +16,21 @@ import random
 
 class BaseSimulator(object):
     """
-    Base class for simulation managers.
+    Base class for simulators.
+
+    Attributes:
+        num_agents       (int)
+        max_num_agents   (int)
+        theoretical_size (float)
+        world            (cps.entity.World)
+        agents           (list-of-cps.entity.Agent)
+        root_nodes       (list-of-cps.state.DataLogNode)
 
     """
     def __init__(self, model, tstart):
         """
-        Create world and agent entities according to model.
-        Attributes:
-            num_agents (int)
-            max_num_agents (int)
-            world (World)
-            agents (list-of-Agent)
-            root_nodes (list-of-DataLogNode)
+        Initialize a simulator according to the specification of the provided
+        model.
 
         """
         # keep count of agents
@@ -87,13 +90,9 @@ class FEMethodSimulator(BaseSimulator):
 
     """
     def initialize(self):
-        """
-        Apply user-defined initialization function and schedule all simulation
-        channels.
-
-        """
         # initialize state variables with user-defined function
         self._initializer(self.agents, self.world)
+
         # schedule simulation channels
         self.world.scheduleAllChannels(self.agents)
         for agent in self.agents:
@@ -241,12 +240,10 @@ class FEMethodSimulator(BaseSimulator):
 
 class AsyncMethodSimulator(BaseSimulator):
     def initialize(self):
-        """
-        Apply user-defined initialization function and schedule all simulation
-        channels.
-
-        """
+        # Apply user-defined initialization function.
         self._initializer(self.agents, self.world)
+
+        # Schedule all simulation channels.
         self.world.scheduleAllChannels(self.agents)
         for agent in self.agents:
             agent.scheduleAllChannels(self.world)

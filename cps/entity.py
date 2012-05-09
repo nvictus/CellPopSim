@@ -83,8 +83,8 @@ def create_world(t_init, wc_table, var_names):
 
 class ChannelNetwork(object):
     """
-    Encapsulates a collection of simulation channels, their dependency structure
-    and the event schedule for an entity.
+    Holds a collection of simulation channels, their dependency structure and
+    the event schedule for an entity.
 
     The event schedule is a simple priority queue based on a linear scan for the
     smallest element. The min element is cached until the queue is updated to
@@ -184,7 +184,11 @@ class ChannelNetwork(object):
 class Entity(object): #Abstract
     """
     Base class for agent/world simulation entities.
-    Implements most of the application-side interface.
+    Implements most of the internal application-side interface.
+
+    The External API provided:
+        stop() - disable further execution on the entity
+        fireChannel() - fire a channel "manually" from within another channel
 
     """
     def __init__(self, time, state, network):
@@ -226,8 +230,6 @@ class Entity(object): #Abstract
         # reschedule dependent channels
         if is_mod:
             for dependent in self.network.dep_graph[channel]:
-                # some of these rescheds may be redundant if the channels
-                # are sync channels that have yet to fire...
                 event_time = dependent.scheduleEvent(self, cargo, self.clock, source)
                 if event_time < self.clock:
                     raise SchedulingError(dependent, self.clock, event_time)
@@ -280,6 +282,13 @@ class World(Entity):
     """
     World entity.
 
+    Attributes:
+        clock       (float)
+        state       (cps.state.State)
+        network     (cps.entity.ChannelNetwork)
+        is_enabled  (bool)
+        is_modified (bool)
+
     """
     def crossScheduleL2G(self, cargo, source_agent):
         """
@@ -312,7 +321,20 @@ class World(Entity):
 
 class Agent(Entity):
     """
-    Agent entity.
+    Agent entity. Agents can be cloned so as to introduce new offspring into
+    the population. They also need to be synchronized before a world event.
+
+    Attributes:
+        clock       (float)
+        state       (cps.state.State)
+        network     (cps.entity.ChannelNetwork)
+        is_enabled  (bool)
+        is_modified (bool)
+
+    External API:
+        stop()
+        fireChannel()
+        clone()
 
     """
     def __init__(self, time, state, network):
@@ -322,32 +344,39 @@ class Agent(Entity):
     def __copy__(self):
         time = self.clock
         state = copy(self.state)
-        network = copy(self.network)
+        network = copy(self.network) #copies event schedule + cached min element
         other = Agent(time, state, network)
-
-        # Get the channel that is firing right now
-        # NOTE: this could fail when there is a tie for the min event (see ChannelNetwork), yielding the wrong channel.
-        #       It works for now because we mirrored the cached min channel from self's network
-        channel, event_time = other.network.getMin()
-
-        # Bookkeeping for the new agent
-        other._prev_channel = channel
-        other.clock = event_time
-        other.is_modified = True #Assume we always want to invoke dependencies on the new agent. It doesn't hurt anyway.
-
-        # New agents are bound to their parent before they are added to the population.
-        # This marker should be removed when the new agent is introduced.
-        other._parent = self
-
         return other
-    clone = __copy__
+
+    def clone(self):
+        # Cloned agents are bound to their parent before they are added to the
+        # population. This marker should be removed when the new agent is added.
+        if self._parent is not None:
+            raise SimulationError("Cannot clone an agent that is not in the population.")
+        other = self.__copy__()
+        other._parent = self
+        return other
 
     def finalizePrevEvent(self):
-        # called by main simulation algorithm after agent is popped from queue
+        """ Called by simulator after a cloned agent is popped from queue """
+        # Get the channel that cloned the agent (i.e. is still firing right now)
+        channel, event_time = self.network.getMin()
+        # NOTE: In principle, doing this could yield the wrong channel when
+        #       there is a tie for the min event. But we are OK because we mirrored
+        #       the cached min channel when the agent was cloned (see ChannelNetwork.__copy__).
+        #       If this behavior changes, it could cause a subtle bug.
+
+        self._prev_channel = channel
+        self.clock = event_time
+
+        # Assume we always want to invoke dependencies on the new agent. It doesn't hurt anyway.
+        self.is_modified = True
+
+        # Remove marker (unbind the parent)
         self._parent = None
 
     def reschedulePrevChannel(self, cargo, source=None):
-        # called by main simulation algorithm after agent is popped from queue
+        """ Called by simulator after a cloned agent is popped from queue """
         prev = self._prev_channel
         event_time = prev.scheduleEvent(self, cargo, self.clock, source)
         if event_time < self.clock:
@@ -364,8 +393,8 @@ class Agent(Entity):
             is_mod = channel.fireEvent(self, world, self.clock, self.clock, queue)
             if is_mod:
                 for dependent in self.network.dep_graph[channel]:
-                    # NOTE:some of these rescheds may be redundant if the dependents
-                    # are gap channels that are still pending to fire in the outer loop...
+                    # NOTE:some of these rescheds may be redundant if any of the dependents
+                    # are sync channels that are still waiting to fire in the outer loop...
                     event_time = dependent.scheduleEvent(self, world, self.clock, source)
                     if event_time < self.clock:
                         raise SchedulingError(dependent, self.clock, event_time)
@@ -399,6 +428,9 @@ class LineageAgent(Agent):
     Agent entity subclass that logs every event to create a lineage tree of
     state and event histories.
 
+    Additional attributes:
+        node    (cps.state.DataLogNode)
+
     """
     def __init__(self, time, state, network):
         super(LineageAgent, self).__init__(time, state, network)
@@ -407,26 +439,14 @@ class LineageAgent(Agent):
     def __copy__(self):
         time = self.clock
         state = copy(self.state)
-        network = copy(self.network) #mirrors the schedule of the parent agent + min event info
+        network = copy(self.network)
         other = LineageAgent(time, state, network)
-
-        # Get the channel that is firing right now
-        channel, event_time = other.network.getMin()
-        # Bookkeeping for the new agent
-        other._prev_channel = channel
-        other.clock = event_time
-        other.is_modified = True # Assume we always want to invoke dependencies on the new agent
-
-        # This marker should be removed when the new agent is introduced into the population.
-        other._parent = self #bind child to parent
 
         # Branch datalog into two new nodes
         l_node, r_node = self.node.branch()
         self.node = l_node
         other.node = r_node
-
         return other
-    clone = __copy__
 
     def fireChannel(self, name, cargo, queue, source=None):
         super(LineageAgent, self).fireChannel(name, cargo, queue, source)
@@ -436,22 +456,21 @@ class LineageAgent(Agent):
         super(LineageAgent, self).fireNextChannel(cargo, queue)
         self.node.record(self.clock, self._prev_channel.id, self.state)
 
-        # NOTE FOR DIVISION EVENTS: the final state of the first new agent (self)
+        # NOTE FOR CLONING EVENTS: the final state of the first new agent (self)
         #   at the completion of the division event gets logged as the first
         #   event on its new datalog.
         #
-        # We don't have access to the second newborn in the fireNextChannel()
+        # We don't have access to the cloned agent in the fireNextChannel()
         # method. It should be lying in the agent queue. Its first event is
-        # "incomplete" because it doesn't get finalized once fireNextChannel()
+        # "incomplete" because it doesn't get finalized when fireNextChannel()
         # returns. Instead, the event is finalized when the agent is retrieved
         # from the queue using finalizePrevEvent(): we record its state to its
-        # datalog. The rest of the finalization process was already done when
-        # the agent was cloned (see __copy__).
+        # datalog.
 
     def finalizePrevEvent(self):
+        super(LineageAgent, self).finalizePrevEvent()
         # Log the event that caused division, recording final state of the newborn
         self.node.record(self.clock, self._prev_channel.id, self.state)
-        self._parent = None #unbind
 
 
 
