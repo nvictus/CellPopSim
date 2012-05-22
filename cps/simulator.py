@@ -11,8 +11,11 @@ Copyright:   (c) Nezar Abdennur 2012
 
 from cps.entity import World, Agent, LineageAgent, AgentQueue, create_agent, create_world
 from cps.misc import IndexedPriorityQueue
-from cps.exception import SimulationError
+from cps.exception import SimulationError, ZeroPopulationError
 import random
+
+NORMAL = 0
+CONSTANT_NUMBER = 1
 
 class BaseSimulator(object):
     """
@@ -90,6 +93,11 @@ class FEMethodSimulator(BaseSimulator):
 
     """
     def initialize(self):
+        if self.num_agents < self.max_num_agents:
+            self._mode = NORMAL
+        else:
+            self._mode = CONSTANT_NUMBER
+
         # initialize state variables with user-defined function
         self._initializer(self.agents, self.world)
 
@@ -151,87 +159,184 @@ class FEMethodSimulator(BaseSimulator):
                     self.timetable.updateitem(world, world.next_event_time)
 
              # add/substitute new agents
-            self._processAgentQueue(tmin)
+            while q:
+                action, agent = q.dequeue()
+                if self._mode == NORMAL:
+                    self._processAgentNormalMode(action, agent)
+                else:
+                    self._processAgentConstantNumberMode(action, agent)
+            world.size = self.theoretical_size
 
             # get earliest event and entity
             emin, tmin = self.timetable.peek()
         #endwhile
 
-    def _processAgentQueue(self, tbarrier):
-        while self._agent_queue:
-            action, agent = self._agent_queue.dequeue()
+    def _processAgentNormalMode(self, action, agent):
+        if action == AgentQueue.ADD_AGENT:
+            new_agent = agent
+            parent = new_agent._parent
 
-            if action == AgentQueue.ADD_AGENT:
-                new_agent = agent
-                parent = new_agent._parent
+            # Finalize the event which added this agent to the queue
+            # and update agent's schedule
+            new_agent.finalizePrevEvent() #removes _parent reference
+            new_agent.reschedulePrevChannel(self.world)
+            new_agent.rescheduleDependentChannels(self.world)
 
-                # Finalize the event which added this agent to the queue
-                # and update agent's schedule
-                new_agent.finalizePrevEvent() #removes _parent reference
-                new_agent.reschedulePrevChannel(self.world)
-                new_agent.rescheduleDependentChannels(self.world)
+            self.agents.append(new_agent)
+            self.timetable.add(new_agent, new_agent.next_event_time)
+            self.num_agents += 1
+            self.theoretical_size += 1
 
-                if self.num_agents < self.max_num_agents:
-                    # NORMAL MODE: Add agent to population
+            # Switch modes if we reach the size threshold
+            if self.num_agents == self.max_num_agents:
+                self._mode = CONSTANT_NUMBER
 
-                    # add to agent list and ipq
-                    self.agents.append(new_agent)
-                    self.timetable.add(new_agent, new_agent.next_event_time)
-                    self.num_agents += 1
-                    self.theoretical_size += 1
-                else:
-                    # CONSTANT-NUMBER MODE: Substitute agent into population
+        elif action == AgentQueue.DELETE_AGENT:
+            target = agent
+            # Remove agent from population
+            try:
+                self.agents.remove(target)
+            except ValueError:
+                raise SimulationError("Agent not found.")
 
-                    index = random.randint(0, len(self.agents)-1)
-                    target = self.agents[index]
-                    # substitute in agent list and ipq
-                    self.agents[index] = new_agent
-                    self.timetable.replaceitem(target, new_agent, new_agent.next_event_time)
-                    del target
-                    self.theoretical_size += self.num_agents/self.theoretical_size
+            self.timetable.pop(target)
+            self.num_agents -= 1
+            self.theoretical_size -= 1
 
-            elif action == AgentQueue.DELETE_AGENT:
-                target = agent
+            if self.num_agents == 0:
+                raise ZeroPopulationError("The population crashed!")
 
-                if self.num_agents < self.max_num_agents:
-                    # NORMAL MODE: Remove agent from population
+    def _processAgentConstantNumberMode(self, action, agent):
+        if action == AgentQueue.ADD_AGENT:
+            new_agent = agent
+            parent = new_agent._parent
 
-                    try:
-                        self.agents.remove(target)
-                    except ValueError:
-                        raise SimulationError("Agent not found.")
+            # Finalize the event which added this agent to the queue
+            # and update agent's schedule
+            new_agent.finalizePrevEvent() #removes _parent reference
+            new_agent.reschedulePrevChannel(self.world)
+            new_agent.rescheduleDependentChannels(self.world)
 
-                    self.timetable.pop(target)
-                    self.num_agents -= 1
-                    self.theoretical_size -= 1
+            # Replace a randomly chosen agent
+            index = random.randint(0, len(self.agents)-1)
+            target = self.agents[index]
+            # substitute in agent list and ipq
+            self.agents[index] = new_agent
+            self.timetable.replaceitem(target, new_agent, new_agent.next_event_time)
+            del target
+            self.theoretical_size += self.theoretical_size/self.num_agents
 
-                    if self.num_agents == 0:
-                        raise SimulationError("The population crashed!")
+        elif action == AgentQueue.DELETE_AGENT:
+            if self.num_agents <= 1:
+                raise SimulationError
 
-                else:
-                    # CONSTANT-NUMBER MODE: Replace with a randomly chosen
-                    # agent
+            target = agent
+            try:
+                i_target = self.agents.index(target)
+            except ValueError:
+                raise SimulationError("Agent not found.")
 
-                    if self.num_agents == 1:
-                        raise SimulationError
+            # Replace with a randomly chosen agent
+            # pick random agent to copy
+            i_source = i_target
+            while i_source == i_target:
+                i_source = random.randint(0, self.num_agents-1)
 
-                    try:
-                        i_target = self.agents.index(target)
-                    except ValueError:
-                        raise SimulationError("Agent not found.")
+            # replace target agent
+            new_agent = self.agents[i_source].clone(); new_agent._parent = None
+            self.agents[i_target] = new_agent
+            self.timetable.replaceitem(target, new_agent, new_agent.next_event_time)
+            del target
+            self.theoretical_size -= self.theoretical_size/self.num_agents
 
-                    # pick random agent to copy
-                    i_source = i_target
-                    while i_source == i_target:
-                        i_source = random.randint(0, self.num_agents-1)
+            # Switch to normal mode if the theoretical size drops below
+            # the constant-number threshold
+##                    if self.theoretical_size < self.max_num
 
-                    # replace target agent
-                    new_agent = self.agents[i_source].clone(); new_agent._parent = None
-                    self.agents[i_target] = new_agent
-                    self.timetable.replaceitem(target, new_agent, new_agent.next_event_time)
-                    del target
-                    self.theoretical_size -= self.num_agents/self.theoretical_size
 
+
+
+
+##    def _processAgentQueue(self, tbarrier):
+##        while self._agent_queue:
+##            action, agent = self._agent_queue.dequeue()
+##
+##            if action == AgentQueue.ADD_AGENT:
+##                new_agent = agent
+##                parent = new_agent._parent
+##
+##                # Finalize the event which added this agent to the queue
+##                # and update agent's schedule
+##                new_agent.finalizePrevEvent() #removes _parent reference
+##                new_agent.reschedulePrevChannel(self.world)
+##                new_agent.rescheduleDependentChannels(self.world)
+##
+##                if self._mode == NORMAL:   #self.num_agents < self.max_num_agents
+##                    # Add to agent to population (list and ipq)
+##                    self.agents.append(new_agent)
+##                    self.timetable.add(new_agent, new_agent.next_event_time)
+##                    self.num_agents += 1
+##                    self.theoretical_size += 1
+##
+##                    # Switch modes if we reach the size threshold
+##                    if self.num_agents == self.max_num_agents:
+##                        self._mode = CONSTANT_NUMBER
+##
+##                else: #_mode == CONSTANT_NUMBER
+##                    # Substitute agent into population
+##                    index = random.randint(0, len(self.agents)-1)
+##                    target = self.agents[index]
+##                    # substitute in agent list and ipq
+##                    self.agents[index] = new_agent
+##                    self.timetable.replaceitem(target, new_agent, new_agent.next_event_time)
+##                    del target
+##                    self.theoretical_size += self.theoretical_size/self.num_agents
+##
+##            elif action == AgentQueue.DELETE_AGENT:
+##                target = agent
+##
+##                if self._mode == NORMAL:
+##                    # Remove agent from population
+##
+##                    try:
+##                        self.agents.remove(target)
+##                    except ValueError:
+##                        raise SimulationError("Agent not found.")
+##
+##                    self.timetable.pop(target)
+##                    self.num_agents -= 1
+##                    self.theoretical_size -= 1
+##
+##                    if self.num_agents == 0:
+##                        raise SimulationError("The population crashed!")
+##
+##                else: # CONSTANT-NUMBER MODE:
+##                    # Replace with a randomly chosen agent
+##
+##                    if self.num_agents == 1:
+##                        raise SimulationError
+##
+##                    try:
+##                        i_target = self.agents.index(target)
+##                    except ValueError:
+##                        raise SimulationError("Agent not found.")
+##
+##                    # pick random agent to copy
+##                    i_source = i_target
+##                    while i_source == i_target:
+##                        i_source = random.randint(0, self.num_agents-1)
+##
+##                    # replace target agent
+##                    new_agent = self.agents[i_source].clone(); new_agent._parent = None
+##                    self.agents[i_target] = new_agent
+##                    self.timetable.replaceitem(target, new_agent, new_agent.next_event_time)
+##                    del target
+##                    self.theoretical_size -= self.theoretical_size/self.num_agents
+##
+##                    # Switch to normal mode if the theoretical size drops below
+##                    # the constant-number threshold
+####                    if self.theoretical_size < self.max_num_agents:
+####                        self._mode = NORMAL
 
 
 
@@ -239,7 +344,16 @@ class FEMethodSimulator(BaseSimulator):
 # Asynchronous Method
 
 class AsyncMethodSimulator(BaseSimulator):
+
+
     def initialize(self):
+        if self.num_agents < self.max_num_agents:
+            self._mode = NORMAL
+        else:
+            self._mode = CONSTANT_NUMBER
+        self.nbirths = 0
+        self.ndeaths = 0
+
         # Apply user-defined initialization function.
         self._initializer(self.agents, self.world)
 
@@ -281,7 +395,17 @@ class AsyncMethodSimulator(BaseSimulator):
                         agent.synchronize(tsync, world, q)
 
             # add/substitute new agents
-            self._processAgentQueue(tsync)
+            #self._processAgentQueue(tsync)
+            replaced = set()
+            while q:
+                action, agent = q.dequeue()
+                if self._mode == NORMAL:
+                    self._processAgentNormalMode(action, agent)
+                else:
+                    self._processAgentConstantNumberMode(action, agent, replaced)
+            replaced.clear()
+            del replaced
+            world.size = self.theoretical_size
 
             # reschedule world channels affected by agent events
             # ***NOTE: Allowing this could be problematic...
@@ -299,94 +423,204 @@ class AsyncMethodSimulator(BaseSimulator):
             # next sync barrier
             tsync = world.next_event_time
 
-    def _processAgentQueue(self, tsync):
-
-        replaced = set()
-
-        while self._agent_queue:
-            action, agent = self._agent_queue.dequeue()
-
+    def _processAgentNormalMode(self, action, agent):
             if action == AgentQueue.ADD_AGENT:
                 new_agent = agent
-                parent = new_agent._parent
 
-                if self.num_agents < self.max_num_agents:
-                    # NORMAL MODE: Add agent to population
+                # Update child agent's event schedule
+                new_agent.finalizePrevEvent() #removes _parent reference
+                new_agent.reschedulePrevChannel(self.world)
+                new_agent.rescheduleDependentChannels(self.world)
 
-                    # Update child agent's event schedule
-                    new_agent.finalizePrevEvent() #removes _parent reference
-                    new_agent.reschedulePrevChannel(self.world)
-                    new_agent.rescheduleDependentChannels(self.world)
+                # Add agent
+                self.agents.append(new_agent)
+                self.theoretical_size += 1
+                self.nbirths += 1
+                self.num_agents += 1
 
-                    # Add agent
-                    self.agents.append(new_agent)
-                    self.theoretical_size += 1
-                    self.num_agents += 1
-
-                elif parent not in replaced:
-                    # CONSTANT-NUMBER MODE: Substitute new agent into population
-
-                    # Update child agent's event schedule to mirror parent's
-                    new_agent.finalizePrevEvent()
-                    new_agent.reschedulePrevChannel(self.world)
-                    new_agent.rescheduleDependentChannels(self.world)
-
-                    # Replace a randomly chosen agent
-                    index = random.randint(0, len(self.agents)-1)
-                    replaced.add(self.agents[index])
-                    self.agents[index] = new_agent
-                    self.theoretical_size += self.num_agents/self.theoretical_size
-
-                else:
-                    # This agent's parent has been replaced by another agent
-                    # --> discard this agent
-                    del new_agent
+                # Switch modes if we reach the size threshold
+                if self.num_agents == self.max_num_agents:
+                    self._mode = CONSTANT_NUMBER
 
             elif action == AgentQueue.DELETE_AGENT:
                 target = agent
+                try:
+                    self.agents.remove(target)
+                except ValueError:
+                    raise SimulationError("Agent not found.")
 
-                if self.num_agents < self.max_num_agents:
-                    # NORMAL MODE: Remove agent from population
+                self.theoretical_size -= 1
+                self.num_agents -= 1
+                self.ndeaths += 1
 
-                    try:
-                        self.agents.remove(target)
-                    except ValueError:
-                        raise SimulationError("Agent not found.")
+                if self.num_agents == 0:
+                    raise SimulationError("The sample population crashed!")
 
-                    self.theoretical_size -= 1
-                    self.num_agents -= 1
+    def _processAgentConstantNumberMode(self, action, agent, replaced):
+        if action == AgentQueue.ADD_AGENT:
+            new_agent = agent
+            parent = new_agent._parent
 
-                    if self.num_agents == 0:
-                        raise SimulationError("The sample population crashed!")
+            if parent not in replaced:
+                # CONSTANT-NUMBER MODE: Substitute new agent into population
 
-                elif target not in replaced:
-                    # CONSTANT-NUMBER MODE: Replace deleted agent with a copy
-                    # of a randomly selected agent
+                # Update child agent's event schedule to mirror parent's
+                new_agent.finalizePrevEvent()
+                new_agent.reschedulePrevChannel(self.world)
+                new_agent.rescheduleDependentChannels(self.world)
 
-                    if self.num_agents == 1:
-                        raise SimulationError
+                # Replace a randomly chosen agent
+                index = random.randint(0, len(self.agents)-1)
+                replaced.add(self.agents[index])
+                self.agents[index] = new_agent
+                self.theoretical_size += self.theoretical_size/self.num_agents
+                self.nbirths += 1
 
-                    try:
-                        i_target = self.agents.index(target)
-                    except ValueError:
-                        raise SimulationError("Agent not found.")
+            else:
+                # This agent's parent has been replaced by another agent
+                # --> discard this agent
+                del new_agent
 
-                    # pick random agent to copy
-                    i_source = i_target
-                    while i_source == i_target:
-                        i_source = random.randint(0, self.num_agents-1)
+        elif action == AgentQueue.DELETE_AGENT:
+            target = agent
+            if target not in replaced:
+                # CONSTANT-NUMBER MODE: Replace deleted agent with a copy
+                # of a randomly selected agent
 
-                    # replace target agent
-                    new_agent = self.agents[i_source].clone(); new_agent._parent = None
-                    self.agents[i_target] = new_agent
-                    del target
+                if self.num_agents == 1:
+                    raise SimulationError
 
-                    self.theoretical_size -= self.num_agents/self.theoretical_size
+                try:
+                    i_target = self.agents.index(target)
+                except ValueError:
+                    raise SimulationError("Agent not found.")
 
-                else:
-                    # This agent has already been replaced --> discard
-                    del target
+                # pick random agent to copy
+                i_source = i_target
+                while i_source == i_target:
+                    i_source = random.randint(0, self.num_agents-1)
 
-        replaced.clear()
-        del replaced
+                # replace target agent
+                new_agent = self.agents[i_source].clone(); new_agent._parent = None
+                self.agents[i_target] = new_agent
+                del target
+
+                self.theoretical_size -= self.theoretical_size/self.num_agents
+                self.ndeaths += 1
+
+                # Switch to normal mode if the theoretical size drops below
+                # the constant-number threshold
+##              if self.theoretical_size < self.max_num_agents:
+##                  self._mode = NORMAL
+            else:
+                # This agent has already been replaced --> discard
+                del target
+
+
+
+
+
+
+
+##    def _processAgentQueue(self, tsync):
+##
+##        replaced = set()
+##
+##        while self._agent_queue:
+##            action, agent = self._agent_queue.dequeue()
+##
+##            if action == AgentQueue.ADD_AGENT:
+##                self.nbirths += 1
+##                new_agent = agent
+##                parent = new_agent._parent
+##
+##                if self._mode == NORMAL:    #self.num_agents < self.max_num_agents
+##                    # NORMAL MODE: Add agent to population
+##
+##                    # Update child agent's event schedule
+##                    new_agent.finalizePrevEvent() #removes _parent reference
+##                    new_agent.reschedulePrevChannel(self.world)
+##                    new_agent.rescheduleDependentChannels(self.world)
+##
+##                    # Add agent
+##                    self.agents.append(new_agent)
+##                    self.theoretical_size += 1
+##                    self.num_agents += 1
+##
+##                    # Switch modes if we reach the size threshold
+##                    if self.num_agents == self.max_num_agents:
+##                        self._mode = CONSTANT_NUMBER
+##
+##                elif parent not in replaced:
+##                    # CONSTANT-NUMBER MODE: Substitute new agent into population
+##
+##                    # Update child agent's event schedule to mirror parent's
+##                    new_agent.finalizePrevEvent()
+##                    new_agent.reschedulePrevChannel(self.world)
+##                    new_agent.rescheduleDependentChannels(self.world)
+##
+##                    # Replace a randomly chosen agent
+##                    index = random.randint(0, len(self.agents)-1)
+##                    replaced.add(self.agents[index])
+##                    self.agents[index] = new_agent
+##                    self.theoretical_size += self.theoretical_size/self.num_agents
+##
+##                else:
+##                    # This agent's parent has been replaced by another agent
+##                    # --> discard this agent
+##                    del new_agent
+##
+##            elif action == AgentQueue.DELETE_AGENT:
+##                self.ndeaths += 1
+##                target = agent
+##
+##                if self._mode == NORMAL:
+##                    # NORMAL MODE: Remove agent from population
+##
+##                    try:
+##                        self.agents.remove(target)
+##                    except ValueError:
+##                        raise SimulationError("Agent not found.")
+##
+##                    self.theoretical_size -= 1
+##                    self.num_agents -= 1
+##
+##                    if self.num_agents == 0:
+##                        raise SimulationError("The sample population crashed!")
+##
+##                elif target not in replaced:
+##                    # CONSTANT-NUMBER MODE: Replace deleted agent with a copy
+##                    # of a randomly selected agent
+##
+##                    if self.num_agents == 1:
+##                        raise SimulationError
+##
+##                    try:
+##                        i_target = self.agents.index(target)
+##                    except ValueError:
+##                        raise SimulationError("Agent not found.")
+##
+##                    # pick random agent to copy
+##                    i_source = i_target
+##                    while i_source == i_target:
+##                        i_source = random.randint(0, self.num_agents-1)
+##
+##                    # replace target agent
+##                    new_agent = self.agents[i_source].clone(); new_agent._parent = None
+##                    self.agents[i_target] = new_agent
+##                    del target
+##
+##                    self.theoretical_size -= self.theoretical_size/self.num_agents
+##
+##                    # Switch to normal mode if the theoretical size drops below
+##                    # the constant-number threshold
+####                    if self.theoretical_size < self.max_num_agents:
+####                        self._mode = NORMAL
+##
+##                else:
+##                    # This agent has already been replaced --> discard
+##                    del target
+##
+##        replaced.clear()
+##        del replaced
 

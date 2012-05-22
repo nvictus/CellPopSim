@@ -390,14 +390,14 @@ class Agent(Entity):
 
         """
         for channel in self.network.sync_channels:
-            is_mod = channel.fireEvent(self, world, self.clock, self.clock, queue)
+            is_mod = channel.fireEvent(self, world, self.clock, tbarrier, queue)
             if is_mod:
                 for dependent in self.network.dep_graph[channel]:
                     # NOTE:some of these rescheds may be redundant if any of the dependents
                     # are sync channels that are still waiting to fire in the outer loop...
-                    event_time = dependent.scheduleEvent(self, world, self.clock, source)
+                    event_time = dependent.scheduleEvent(self, world, tbarrier, source)
                     if event_time < self.clock:
-                        raise SchedulingError(dependent, self.clock, event_time)
+                        raise SchedulingError(dependent, tbarrier, event_time)
                     self.network[dependent] = event_time
         self.clock = tbarrier
 
@@ -450,7 +450,7 @@ class LineageAgent(Agent):
 
     def fireChannel(self, name, cargo, queue, source=None):
         super(LineageAgent, self).fireChannel(name, cargo, queue, source)
-        self.node.record(self.clock, self._prev_channel.id, self.state)
+        self.node.record(self.clock, self.network.channel_dict[name].id, self.state) #SHOULD THESE BE RECORDED?
 
     def fireNextChannel(self, cargo, queue):
         super(LineageAgent, self).fireNextChannel(cargo, queue)
