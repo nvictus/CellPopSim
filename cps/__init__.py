@@ -20,7 +20,8 @@ www.sysbiolab.uottawa.ca
 #!/usr/bin/env python
 
 from cps.channel import AgentChannel, WorldChannel, RecordingChannel
-from cps.state import Recorder, save_snapshot, save_lineage
+from cps.state import Recorder
+from cps.save import save_snapshot, save_lineage
 from cps.simulator import FEMethodSimulator, AsyncMethodSimulator
 from cps.model import Model
 

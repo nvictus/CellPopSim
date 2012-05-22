@@ -43,3 +43,5 @@ class FiringError(SimulationError):
                str(self.channel.id) + " attempted to fire an event at t=" + str(self.fire_time)\
                + ", but the agent's clock is currently at t=" + str(self.clock_time) + "."
 
+class ZeroPopulationError(SimulationError):
+    pass
