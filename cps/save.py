@@ -3,7 +3,12 @@
 # These functions convert recorded data into numpy arrays and save them to disk
 # in hdf5 format.
 import numpy as np
+import scipy.io
 import h5py
+
+
+def savemat_snapshot(filename, recorder):
+    scipy.io.savemat(filename, recorder.__dict__, oned_as='column')
 
 def save_snapshot(filename, recorder):
     """
