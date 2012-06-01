@@ -448,8 +448,8 @@ class LineageAgent(Agent):
         other.node = r_node
         return other
 
-    def fireChannel(self, name, cargo, queue, source=None):
-        super(LineageAgent, self).fireChannel(name, cargo, queue, source)
+    def fireChannel(self, name, cargo, t_fire, queue, source=None):
+        super(LineageAgent, self).fireChannel(name, cargo, t_fire, queue, source)
         self.node.record(self.clock, self.network.channel_dict[name].id, self.state) #SHOULD THESE BE RECORDED?
 
     def fireNextChannel(self, cargo, queue):
