@@ -10,7 +10,7 @@ Copyright:   (c) Nezar Abdennur 2012
 
 from cps.channel import *
 from cps.exception import SchedulingError, SimulationError
-from cps.state import State, DataLogNode
+from cps.state import State, LoggerNode
 from copy import copy
 import heapq
 
@@ -18,7 +18,7 @@ import heapq
 #-------------------------------------------------------------------------------
 # Factory functions for creating entities from model input data
 
-def create_agent(agent_class, t_init, ac_table, wc_table, var_names, logger):
+def create_agent(t_init, ac_table, wc_table, var_names, logging=False, logger_args=None):
     """
     Factory for agent entities. World channels are not copied.
 
@@ -46,13 +46,14 @@ def create_agent(agent_class, t_init, ac_table, wc_table, var_names, logger):
     network = ChannelNetwork(channel_dict, dep_graph, l2g_graph, g2l_graph, sync_channels, t_init)
 
     # create state object
-    if logger is not None:
-        state = State(var_names, logger)
-    else:
-        state = State(var_names)
+    state = State(var_names)
 
     # create agent
-    return agent_class(t_init, state, network)
+    if logging:
+        node = LoggerNode(*logger_args)
+        return LoggingAgent(t_init, state, network, node)
+    else:
+        return Agent(t_init, state, network)
 
 
 def create_world(t_init, wc_table, var_names):
@@ -111,7 +112,7 @@ class ChannelNetwork(object):
         self.__next_event_time = None
         self.__next_channel = None
         self.__updated = True
-        #NOTE: could use a list of all channels to help enforce an ordering for tie-breaking...
+        #NOTE: could use a sequence of all channels to help enforce an ordering for tie-breaking...
         #      or use 2-tuples as priority keys (event_time, index)
 
     def __contains__(self, channel):
@@ -423,24 +424,24 @@ class Agent(Entity):
         return self.network.l2g_graph[self._prev_channel]
 
 
-class LineageAgent(Agent):
+class LoggingAgent(Agent):
     """
     Agent entity subclass that logs every event to create a lineage tree of
     state and event histories.
 
     Additional attributes:
-        node    (cps.state.DataLogNode)
+        node    (cps.state.LoggerNode)
 
     """
-    def __init__(self, time, state, network):
-        super(LineageAgent, self).__init__(time, state, network)
-        self.node = DataLogNode()
+    def __init__(self, time, state, network, logger=None):
+        super(LoggingAgent, self).__init__(time, state, network)
+        self.node = logger
 
     def __copy__(self):
         time = self.clock
         state = copy(self.state)
         network = copy(self.network)
-        other = LineageAgent(time, state, network)
+        other = LoggingAgent(time, state, network)
 
         # Branch datalog into two new nodes
         l_node, r_node = self.node.branch()
@@ -449,11 +450,11 @@ class LineageAgent(Agent):
         return other
 
     def fireChannel(self, name, cargo, t_fire, queue, source=None):
-        super(LineageAgent, self).fireChannel(name, cargo, t_fire, queue, source)
+        super(LoggingAgent, self).fireChannel(name, cargo, t_fire, queue, source)
         self.node.record(self.clock, self.network.channel_dict[name].id, self.state) #SHOULD THESE BE RECORDED?
 
     def fireNextChannel(self, cargo, queue):
-        super(LineageAgent, self).fireNextChannel(cargo, queue)
+        super(LoggingAgent, self).fireNextChannel(cargo, queue)
         self.node.record(self.clock, self._prev_channel.id, self.state)
 
         # NOTE FOR CLONING EVENTS: the final state of the first new agent (self)
@@ -468,7 +469,7 @@ class LineageAgent(Agent):
         # datalog.
 
     def finalizePrevEvent(self):
-        super(LineageAgent, self).finalizePrevEvent()
+        super(LoggingAgent, self).finalizePrevEvent()
         # Log the event that caused division, recording final state of the newborn
         self.node.record(self.clock, self._prev_channel.id, self.state)
 
