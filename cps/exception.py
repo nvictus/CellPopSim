@@ -45,3 +45,6 @@ class FiringError(SimulationError):
 
 class ZeroPopulationError(SimulationError):
     pass
+
+class LoggingError(SimulationError):
+    pass
