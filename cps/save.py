@@ -8,26 +8,15 @@ import h5py
 
 
 def savemat_snapshot(filename, recorder):
-    scipy.io.savemat(filename, recorder.__dict__, oned_as='column')
+    scipy.io.savemat(filename, recorder.log, oned_as='column')
 
-def save_snapshot(filename, recorder):
-    """
-    Assumes recorder has a field named "time" and the other recorded state
-    variables can be converted directly into numpy arrays.
-
-    """
-    try:
-        dfile = h5py.File(filename, 'w')
-        dfile.create_dataset(name='time', data=np.array(recorder.time))
-        dfile.create_dataset(name='size', data=np.array(recorder.size))
-        for dname in recorder.getFields():
-            dfile.create_dataset(name=dname, data=np.array(getattr(recorder, dname)))
-
-    finally:
-        dfile.close()
+def savehdf_snapshot(filename, recorder):
+    with h5py.File(filename, 'w') as dfile:
+        for name, data in recorder.log.items():
+            dfile.create_dataset(name=name, data=np.array(data))
 
 
-def save_lineage(filename, root_node, var_names):
+def _accumulate(root):
     """
     Traverses datalog tree and restructures the simulation data -- for each
     state variable, the event history of all the cells is concatenated and
@@ -37,45 +26,53 @@ def save_lineage(filename, root_node, var_names):
     Recording scheme originally devised by Andrei Anisenia.
 
     """
-    adj_list = root_node.traverse()
-    tstamp = []
-    estamp = []
-    data = []
-    output_adj_list = []
+    adjacency_list = root.traverse()
+    adj_data = []
+    time_data = []
+    event_data = []
+    names = [k for k in root.log.keys() if k != 'time' and k != 'channel']
+    state_data = {name:[] for name in names}
 
     row = 0
-    for parent, child in adj_list:
+    for parent, child in adjacency_list:
         pid = id(parent) if parent is not None else 0
         cid = id(child)
+        num_events = len(child.log['time'])
 
-        tstamp.extend(child.tstamp)
-        estamp.extend(child.estamp)
-        data.extend(child.log)
+        for name, values in child.log.items():
+            if name == 'time':
+                time_data.extend(values)
+            elif name == 'channel':
+                event_data.extend(values)
+            else:
+                state_data[name].extend(values)
+        adj_data.append([pid, cid, row, num_events])
+        row += num_events
+    return time_data, event_data, names, state_data, adj_data
 
-        output_adj_list.append([pid, cid, row, len(child.log)])
-        row += len(child.log)
 
-    try:
+def savemat_lineage(filename, root_node):
+    time_data, event_data, names, state_data, adj_data = _accumulate(root_node)
+    all_data = {'time':time_data, 'event':event_data, 'adj_list':adj_data, 'adj_info':['parent_id', 'id', 'start_row', 'num_events']}
+    all_data.update(state_data)
+    scipy.io.savemat(filename, all_data, oned_as='column')
+
+def savehdf_lineage(filename, root_node):
+    time_data, event_data, names, state_data, adj_data = _accumulate(root_node)
+    with h5py.File(filename, 'w') as dfile:
         dfile = h5py.File(filename,'w')
         # Tree adjacency list
         dfile.create_dataset(name='adj_info',
-                             data=np.array(['parent_id',
-                                            'id',
-                                            'start_row',
-                                            'num_events'], dtype=np.bytes_))
+                             data=np.array(['parent_id', 'id', 'start_row', 'num_events'], dtype=np.bytes_) )
         dfile.create_dataset(name='adj_data',
-                             data=np.array(output_adj_list))
+                             data=np.array(adj_data))
 
-        # Log of time and event type
+        # Data
         dfile.create_dataset(name='time',
-                             data=np.array(tstamp))
+                             data=np.array(time_data))
         dfile.create_dataset(name='event',
-                             data=np.array(estamp, dtype=np.bytes_))
+                             data=np.array(event_data, dtype=np.bytes_) )
 
-        # Data values
-        dfile.create_dataset(name='state_info',
-                             data=np.array(var_names, dtype=np.bytes_))
-        dfile.create_dataset(name='state_data',
-                             data=np.array(data))
-    finally:
-        dfile.close()
+        for name in names:
+            dfile.create_dataset(name=name,
+                                 data=np.array(state_data[name]))

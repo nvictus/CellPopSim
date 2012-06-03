@@ -21,7 +21,7 @@ www.sysbiolab.uottawa.ca
 
 from cps.channel import AgentChannel, WorldChannel, RecordingChannel
 from cps.state import Recorder
-from cps.save import save_snapshot, save_lineage
+from cps.save import savemat_snapshot, savemat_lineage, savehdf_snapshot, savehdf_lineage
 from cps.simulator import FEMethodSimulator, AsyncMethodSimulator
 from cps.model import Model
 
