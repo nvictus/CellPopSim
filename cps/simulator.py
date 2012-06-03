@@ -9,7 +9,7 @@ Copyright:   (c) Nezar Abdennur 2012
 """
 #!/usr/bin/env python
 
-from cps.entity import World, Agent, LineageAgent, AgentQueue, create_agent, create_world
+from cps.entity import AgentQueue, create_agent, create_world
 from cps.misc import IndexedPriorityQueue
 from cps.exception import SimulationError, ZeroPopulationError
 import random
@@ -51,21 +51,19 @@ class BaseSimulator(object):
         self.root_nodes = []
         for i in range(self.num_agents):
             if i in model.track_lineage:
-                agent = create_agent(LineageAgent,
-                                     tstart,
+                agent = create_agent(tstart,
                                      model.agent_channel_table,
                                      model.world_channel_table,
                                      model.agent_vars,
-                                     model.logger)
+                                     logging=True,
+                                     logger_args=model.logger_args)
                 self.agents.append(agent)
                 self.root_nodes.append(agent.node)
             else:
-                self.agents.append(create_agent(Agent,
-                                                tstart,
+                self.agents.append(create_agent(tstart,
                                                 model.agent_channel_table,
                                                 model.world_channel_table,
-                                                model.agent_vars,
-                                                model.logger))
+                                                model.agent_vars))
 
         # initialization routine
         self._initializer = lambda x,y: model.initializer(x,y,model.parameters)
