@@ -57,7 +57,7 @@ class Model(object):
                        initializer,
                        parameters=None,
                        track_lineage=[],
-                       logger=None):
+                       logger_args=None):
 
         self.world_channel_table = {}
         self.agent_channel_table = {}
@@ -72,12 +72,12 @@ class Model(object):
         self.initializer = initializer
 
         # Optional arguments
-        if logger is not None and not callable(logger):
-            raise TypeError("Logger must be callable and take 1 argument.")
+        if logger_args is not None and not tuple(logger_args):
+            raise TypeError("Logger args: expected a 2-tuple (list of variable names, recording function).")
         if track_lineage and any ([not 0 <= i < init_num_agents for i in track_lineage]):
             raise ValueError("Lineages to be tracked must be specified as a list of integers between 0 and init_num_agents.")
         self.parameters = parameters
-        self.logger = logger
+        self.logger_args = logger_args
         self.track_lineage = track_lineage
 
     def addWorldChannel(self, channel, name=None, wc_dependents=[], ac_dependents=[]):
