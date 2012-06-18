@@ -20,12 +20,12 @@ www.sysbiolab.uottawa.ca
 #!/usr/bin/env python
 
 from cps.channel import AgentChannel, WorldChannel, RecordingChannel
-from cps.state import Recorder
+from cps.logging import Recorder
 from cps.save import savemat_snapshot, savemat_lineage, savehdf_snapshot, savehdf_lineage
-from cps.simulator import FEMethodSimulator, AsyncMethodSimulator
+from cps.simulator import FMSimulator, AMSimulator
 from cps.model import Model
 
-from cps.entity import AgentQueue
+from cps.misc import AgentQueue
 ADD_AGENT = AgentQueue.ADD_AGENT
 DELETE_AGENT = AgentQueue.DELETE_AGENT
 del AgentQueue

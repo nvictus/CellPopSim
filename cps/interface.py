@@ -12,6 +12,9 @@ Copyright:   (c) Nezar Abdennur 2012
 """
 #!/usr/bin/env python
 
+#---------------------------------------------------------------------------------
+# Framework API
+
 class IChannel(object):
     """
     Query and modify simulation entity state.
@@ -25,7 +28,7 @@ class IChannel(object):
         """
         raise NotImplementedError
 
-    def fireEvent(self, entity, cargo, time, event_time, queue):
+    def fireEvent(self, entity, cargo, time, event_time, **kwargs):
         """
         Perform a simulation event.
         Return True if the state of the entity was modified, else False.
@@ -33,6 +36,38 @@ class IChannel(object):
         """
         raise NotImplementedError
 
+class ILogger(object):
+    def record(self, time, world, agents):
+        raise NotImplementedError
+
+class IIinitializer(object):
+    def initialize(self, world, agents, *args, **kwargs):
+        raise NotImplementedError
+
+class IModel(object):
+    def addAgentChannel(self):
+        raise NotImplementedError
+
+    def addWorldChannel(self):
+        raise NotImplementedError
+
+    def addInitializer(self):
+        raise NotImplementedError
+
+    def addLogger(self):
+        raise NotImplementedError
+
+    def addRecorder(self):
+        raise NotImplementedError
+
+class ISimulator(object):
+    def runSimulation(self, tstop):
+        raise NotImplementedError
+
+
+
+#-----------------------------------------------------------------------------
+# Internal API used by channel
 
 class IWorld(object):
     """
@@ -41,28 +76,14 @@ class IWorld(object):
     A world entity holds common resources and global variables.
 
     """
-    def fireChannel(self, name, cargo, event_time, q):
-        """
-        Perform simulation event of named channel.
-        The simulation clock is not advanced.
-
-        """
+    def _fireNested(self, channel_name, firing_time, source=None, **kwargs):
         raise NotImplementedError
 
-    def start(self):
-        """
-        Promote the entity into the event loop.
-
-        """
+    def _reschedule(self, channel_name, source=None):
         raise NotImplementedError
 
-    def stop(self):
-        """
-        Remove the entity from the event loop.
-
-        """
+    def _stop(self):
         raise NotImplementedError
-
 
 class IAgent(object):
     """
@@ -71,91 +92,49 @@ class IAgent(object):
     An agent entity holds the state of an individual. Agents can be replicated.
 
     """
-    def fireChannel(self, name, cargo, event_time, q):
-        """
-        Perform simulation event of named channel.
-        The simulation clock is not advanced.
-
-        """
+    def _fireNested(self, channel_name, firing_time, source=None, **kwargs):
         raise NotImplementedError
 
-    def start(self):
-        """
-        Promote the agent into the event loop.
-
-        """
+    def _reschedule(self, channel_name, source=None):
         raise NotImplementedError
 
-    def stop(self):
-        """
-        Remove the agent from the event loop.
-
-        """
+    def __copy__(self):
         raise NotImplementedError
 
-    def clone(self):
-        """
-        Make a new agent that is a copy of the current one.
-
-        """
+    def _kill(self):
         raise NotImplementedError
 
 
-class IScheduler(object):
-    """
-    Application-side interface provided by a simulation entity (agent/world).
-    This interface is used by the simulation manager to conduct a simulation.
 
-    """
-    def scheduleAllChannels(self, cargo, source):
-        """
-        Schedule every simulation channel and store event times in a timetable.
+#-----------------------------------------------------------------------------
+# Internal API used by simulator
 
-        """
+class IExecWorld(object):   
+    def _scheduleAllChannels(self, agents):
         raise NotImplementedError
 
-    def fireNextChannel(self, cargo, q):
-        """
-        Fire the simulation channel with the earliest event time.
-        Advance the simulation clock.
-        Reschedule the channel.
-
-        """
+    def _fireNextChannel(self, agents): #needs source?
         raise NotImplementedError
 
-    def rescheduleDependentChannels(self, cargo, source):
-        """
-        Reschedule channels that depend on the previously fired channel.
-
-        """
-        raise NotImplementedError
-
-    def closeGaps(self, cargo, q, source, tbarrier):
-        """
-        Fire gap simulation channels with event time 'tbarrier'.
-        Reschedule any dependent channels.
-        Advance clock to tbarrier.
-
-        """
-        raise NotImplementedError
-
-    def rescheduleAux(self, cargo, source):
-        """
-        Reschedule any channels that depend on the last channel fired by the
-        foreign entity 'source'.
-
-        """
-        raise NotImplementedError
-
-    def getNextEventTime(self):
-        """ TODO: make this a dependent, read-only property """
+    def _crossScheduleL2G(self, agents, dependent_wcs, source_agent=None):
         raise NotImplementedError
 
 
-class IRecorder(object):
-    """
-    Record global simulation data.
-
-    """
-    def record(self, time, world, agents):
+class IExecAgent(object):
+    def _scheduleAllChannels(self, world):
         raise NotImplementedError
+
+    def _fireNextChannel(self, world): #needs source?
+        raise NotImplementedError
+
+    def _synchronize(self, world, tbarrier):
+        raise NotImplementedError
+
+    def _getDependentWCs(self):
+        raise NotImplementedError
+
+    def _crossScheduleG2L(self, world):
+        raise NotImplementedError
+    
+    #def _prepareNewAgent(self, world):
+
