@@ -9,6 +9,7 @@ Copyright:   (c) Nezar Abdennur 2012
 #!/usr/bin/env python
 
 import collections
+import heapq
 
 class IPQEntry(object):
     def __init__(self, item, pkey):
@@ -328,6 +329,78 @@ class IndexedPriorityQueue(collections.MutableMapping):
         # Put item in its new place
         heap[pos] = entry
         finder[entry.item] = pos
+
+
+
+#-------------------------------------------------------------------------------
+# Priority queue for adding/removing agents from the population
+
+class AgentQueue(object):
+    """
+    A queue of agents to be introduced or removed from the population at
+    specified times according to the specified action. Agents are retrieved in
+    time-stamp order.
+
+    Constants:
+        ADD_AGENT
+        DELETE_AGENT
+
+    Attributes:
+        heap (list): binary heap holding agents
+
+    """
+    ADD_AGENT = 1
+    DELETE_AGENT = -1
+
+    class Entry(object):
+        def __init__(self, priority_key, item, action=None):
+            self.priority_key = priority_key
+            self.item = item
+            self.action = action
+
+        def __lt__(self, other):
+            return self.priority_key < other.priority_key
+
+    def __init__(self):
+        self.heap = []
+
+    def __len__(self):
+        return len(self.heap)
+
+    def enqueue(self, action, agent, priority_key):
+        if action == AgentQueue.ADD_AGENT:
+            if agent._parent:
+                heapq.heappush( self.heap, AgentQueue.Entry(priority_key, agent, action) )
+            else:
+                raise SimulationError("The agent queued for insertion is already in the population.")
+        elif action == AgentQueue.DELETE_AGENT:
+            if agent._parent:
+                raise SimulationError("The agent queued for deletion is not in the population.")
+            else:
+                agent.stop()
+                heapq.heappush( self.heap, AgentQueue.Entry(priority_key, agent, action) )
+        else:
+            raise SimulationError("Invalid action.")
+
+    def dequeue(self):
+        try:
+            entry = heapq.heappop( self.heap )
+        except IndexError:
+            raise KeyError
+        return entry.action, entry.item
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
