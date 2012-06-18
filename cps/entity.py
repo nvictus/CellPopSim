@@ -9,525 +9,529 @@ Copyright:   (c) Nezar Abdennur 2012
 #!/usr/bin/env python
 
 from cps.channel import *
-from cps.exception import SchedulingError, SimulationError
-from cps.state import State, LoggerNode
+from cps.logging import LoggerNode
+from cps.exception import SchedulingError, FiringError, SimulationError
+from cps.simulator import FMSimulator, AMSimulator
+
+
 from copy import copy
+import collections
 import heapq
-
-
-#-------------------------------------------------------------------------------
-# Factory functions for creating entities from model input data
-
-def create_agent(t_init, ac_table, wc_table, var_names, logging=False, logger_args=None):
-    """
-    Factory for agent entities. World channels are not copied.
-
-    """
-    # make a copy of each channel instance provided
-    copied = {entry.channel:copy(entry.channel) for entry in ac_table.values()}
-
-    # build channel dependency graphs and local event schedule
-    g2l_graph = {}
-    for entry in wc_table.values():
-        g2l_graph[entry.channel] = tuple([copied[channel] for channel in entry.wc_dependents])
-    channel_dict = {}
-    dep_graph = {}
-    l2g_graph = {}
-    sync_channels = []
-    for name, entry in ac_table.items():
-        channel_dict[name] = copied[entry.channel]
-        dep_graph[copied[entry.channel]] = tuple([copied[channel] for channel in entry.ac_dependents])
-        l2g_graph[copied[entry.channel]] = tuple(entry.wc_dependents)
-        if entry.sync:
-            sync_channels.append(copied[entry.channel])
-    sync_channels = tuple(sync_channels)
-
-    # create channel network/event schedule
-    network = ChannelNetwork(channel_dict, dep_graph, l2g_graph, g2l_graph, sync_channels, t_init)
-
-    # create state object
-    state = State(var_names)
-
-    # create agent
-    if logging:
-        node = LoggerNode(*logger_args)
-        return LoggingAgent(t_init, state, network, node)
-    else:
-        return Agent(t_init, state, network)
-
-
-def create_world(t_init, wc_table, var_names):
-    """
-    Factory for world entities. World channels are not copied.
-
-    """
-    # build channel dependency graph and global event schedule
-    channel_dict = {}
-    dep_graph = {}
-    for name, entry in wc_table.items():
-        channel_dict[name] = entry.channel
-        dep_graph[entry.channel] = tuple([channel for channel in entry.wc_dependents])
-
-    # create channel network/event schedule
-    network = ChannelNetwork(channel_dict, dep_graph, t_init=t_init)
-
-    # create state object
-    state = State(var_names)
-
-    # create world
-    return World(t_init, state, network)
-
+import math
 
 
 #-------------------------------------------------------------------------------
 # Manage a network of simulation channels
 
-class ChannelNetwork(object):
+class ChannelSchedule(dict):
     """
-    Holds a collection of simulation channels, their dependency structure and
-    the event schedule for an entity.
-
-    The event schedule is a simple priority queue based on a linear scan for the
-    smallest element. The min element is cached until the queue is updated to
-    improve lookup efficiency.
-
-    Attributes:
-        channel_dict    (dict: name -> channel)
-        timetable       (dict: channel -> float)
-        dep_graph       (dict: channel -> tuple of channels)
-        l2g_graph       (dict: channel -> tuple of channels)
-        g2l_graph       (dict: channel -> tuple of channels)
-        sync_channels   (tuple of channels)
-
-    NOTE: we could switch to an indexed heap priority queue...
+    A simple prioritized collection that uses linear scan to find the smallest
+    item (channel with earliest event time). The min item is cached until the 
+    queue is updated to improve lookup efficiency.
 
     """
-    def __init__(self, channel_dict, dep_graph, l2g_graph=None, g2l_graph=None, sync_channels=(), t_init=float('-inf')):
-        self.channel_dict = channel_dict
-        self.timetable = {channel:t_init for channel in channel_dict.values()}
-        self.dep_graph = dep_graph
-        self.l2g_graph = l2g_graph
-        self.g2l_graph = g2l_graph
-        self.sync_channels = sync_channels
-        self.__next_event_time = None
-        self.__next_channel = None
+    #NOTE: we can make a subclass where __setitem__ stores the timetable values
+    #as pairs [time, rank] to implement a ranked priority queue for tie-breaking
+    #between channels with the same event time...
+    #
+    #NOTE: we could also switch to an indexed heap-based priority queue...
+
+    def __init__(self, *args):
+        self.update(dict(*args))
+        if not self:
+            raise ValueError('Schedule requires at least one channel')
+        self.__earliest_channel = None
+        self.__earliest_time = None
         self.__updated = True
-        #NOTE: could use a sequence of all channels to help enforce an ordering for tie-breaking...
-        #      or use 2-tuples as priority keys (event_time, index)
-
-    def __contains__(self, channel):
-        return channel in self.timetable
-
-    def __iter__(self):
-        return iter(self.timetable.keys())
-
-    def __getitem__(self, channel):
-        return self.timetable[channel]
 
     def __setitem__(self, channel, event_time):
-        self.timetable[channel] = event_time
+        super(ChannelSchedule, self).__setitem__(channel, event_time)
+        channel._event_time = event_time
         self.__updated = True
 
-    def getMin(self):
+    def earliestItem(self):
         #NOTE: min() is run on a dict_items whose order of elements is arbitrary
         #      therefore the element chosen when two channels have the same
         #      event time is arbitrary as well
         if self.__updated:
-            cmin, tmin = min(self.timetable.items(), key=lambda x: x[1])
-            self.__next_channel = cmin
-            self.__next_event_time = tmin
+            cmin, tmin = min(self.items(), key=lambda x: x[1])
+            self.__earliest_channel = cmin
+            self.__earliest_time = tmin
             self.__updated = False
-        return self.__next_channel, self.__next_event_time
+        return self.__earliest_channel, self.__earliest_time
+
+
+class Scheduler(object):
+    """
+    Manages the simulation channels assigned to an entity. Provides an updatable event 
+    schedule mapping channels to their event times, and exposes the channels, their 
+    dependency structure and the entity's clock.
+
+    Attributes:
+        clock           float
+        enabled         bool  #TODO: drop this?
+        channel_dict    (dict: name -> channel)
+        dep_graph       (dict: channel -> tuple of channels)
+        *l2g_graph      (dict: channel -> tuple of channels)
+        *g2l_graph      (dict: channel -> tuple of channels)
+        *sync_channels  (tuple of channels)
+
+    *applies only to agent schedulers
+
+    """
+    def __init__(self, time, timetable, dep_graph, l2g_graph=None, g2l_graph=None, sync_channels=()):
+        if any([t < time for t in timetable.values()]):
+           raise SchedulingError("Cannot create scheduler: some channel's event time precedes the current clock time.")
+        elif math.isnan(time):
+            raise ValueError("Clock time cannot be NaN")
+        self._timetable = ChannelSchedule(timetable)
+        self.clock = time
+        self.enabled = True
+        self.channel_dict = {channel._id:channel for channel in timetable}
+        self.dep_graph = dep_graph
+        if l2g_graph is not None:
+            self.l2g_graph = l2g_graph
+            self.g2l_graph = g2l_graph
+            self.sync_channels = sync_channels
+            # check that no sync channel has sync channel dependents
+            for c in sync_channels:
+                if any([dependent in sync_channels for dependent in dep_graph[c]]):
+                    raise ValueError("Sync channels should not sync channel dependents.")
+
+    @staticmethod
+    def agentSchedulerFromModel(t_init, ac_table, wc_table):
+        """
+        World channels are not copied.
+
+        """
+        # make a copy of each channel instance provided
+        copied = {entry.channel:copy(entry.channel) for entry in ac_table.values()}
+        timetable = dict( zip(copied.values(), [t_init]*len(copied)) )
+
+        # build channel dependency graphs and local event schedule
+        g2l_graph = {}
+        for entry in wc_table.values():
+            g2l_graph[entry.channel] = tuple([copied[channel] for channel in entry.wc_dependents])
+        dep_graph = {}
+        l2g_graph = {}
+        sync_channels = []
+        for entry in ac_table.values():
+            dep_graph[copied[entry.channel]] = tuple([copied[channel] for channel in entry.ac_dependents])
+            l2g_graph[copied[entry.channel]] = tuple(entry.wc_dependents)
+            if entry.sync:
+                sync_channels.append(copied[entry.channel])
+        sync_channels = tuple(sync_channels)
+        return Scheduler(t_init, timetable, dep_graph, l2g_graph, g2l_graph, sync_channels)
+
+    @staticmethod
+    def worldSchedulerFromModel(t_init, wc_table):
+        """
+        World channels are not copied.
+
+        """
+        # build channel dependency graph and global event schedule
+        timetable = {entry.channel:t_init for entry in wc_table.values()}
+        dep_graph = {}
+        for entry in wc_table.values():
+            dep_graph[entry.channel] = tuple([channel for channel in entry.wc_dependents])
+        return Scheduler(t_init, timetable, dep_graph)
+
+    @property
+    def next_event_time(self):
+        return self._timetable.earliestItem()[1]
+
+    def __contains__(self, channel):
+        return channel in self._timetable
+
+    def __iter__(self):
+        return iter(self._timetable.keys())
+
+    def __getitem__(self, channel):
+        return self._timetable[channel]
+
+    def __setitem__(self, channel, event_time):
+        if event_time < self.clock: #catch NaNs here too?
+            raise SchedulingError
+        else:
+            self._timetable[channel] = event_time
 
     def __copy__(self):
         # make a copy of each simulation channel, mapped to the original
-        orig_copied = {channel:copy(channel) for channel in self.timetable}
-
+        orig_copied = {channel:copy(channel) for channel in self}
+        # mirror the timetable
+        timetable = ChannelSchedule({orig_copied[channel]:time for channel, time in self._timetable.items()})
         # mirror the dictionary of channels
         channel_dict = {name:orig_copied[self.channel_dict[name]] for name in self.channel_dict}
-
-        # mirror the list of gap channels
-        sync_channels = tuple([orig_copied[sync] for sync in self.sync_channels])
-
-        # mirror the dependency graphs
+        # mirror the dependency graph
         dep_graph = {}
         for orig in orig_copied:
             dependencies = self.dep_graph[orig]
             dep_graph[orig_copied[orig]] = tuple([orig_copied[dependency] for dependency in dependencies])
-        l2g_graph = {}
-        for orig in orig_copied:
-            dependencies = self.l2g_graph[orig]
-            l2g_graph[orig_copied[orig]] = tuple([dependency for dependency in dependencies])
-        g2l_graph= {}
-        for world_channel in self.g2l_graph:
-            dependencies = self.g2l_graph[world_channel]
-            g2l_graph[world_channel] = tuple([orig_copied[dependency] for dependency in dependencies])
-
         # create a new network with cloned channels and dependency graphs
-        other = ChannelNetwork(channel_dict, dep_graph, l2g_graph, g2l_graph, sync_channels)
-
-        # copy over the event times
-        for channel in self.timetable:
-            other.timetable[orig_copied[channel]] = self.timetable[channel]
-
-        # cached data (if available)
-        if self.__next_event_time is not None:
-            other.__next_channel = orig_copied[self.__next_channel]
-            other.__next_event_time = self.__next_event_time
-            other.__updated = False
+        other = self.__class__.__new__(self.__class__)
+        other.clock = self.clock
+        other.enabled = self.enabled
+        other.channel_dict = channel_dict
+        other.dep_graph = dep_graph
+        other._timetable = timetable
+        if hasattr(self, 'l2g_graph'):
+            # mirror the cross-dependency graphs
+            l2g_graph = {}
+            for orig in orig_copied:
+                dependencies = self.l2g_graph[orig]
+                l2g_graph[orig_copied[orig]] = tuple([dependency for dependency in dependencies])
+            g2l_graph= {}
+            for world_channel in self.g2l_graph:
+                dependencies = self.g2l_graph[world_channel]
+                g2l_graph[world_channel] = tuple([orig_copied[dependency] for dependency in dependencies])
+            # mirror the list of sync channels
+            sync_channels = tuple([orig_copied[sync] for sync in self.sync_channels])
+            # add extra attributes
+            other.l2g_graph = l2g_graph
+            other.g2l_graph = g2l_graph
+            other.sync_channels = sync_channels
+        #if self._curr_channel is not None:
+        #    other._curr_channel = orig_copied[self._curr_channel]
         return other
+
+    def next(self):
+        cmin, tmin = self._timetable.earliestItem()
+        return cmin, tmin
 
 
 
 #-------------------------------------------------------------------------------
 # Simulation entities: agents & world
 
-class Entity(object): #Abstract
+class BaseEntity(object):
     """
     Base class for agent/world simulation entities.
-    Implements most of the internal application-side interface.
+    When passed to simulation channel methods, entities provide a set of 
+    user-defined state variables. Attributes and methods with leading 
+    underscores make up the internal API for the simulator.
 
-    The External API provided:
-        stop() - disable further execution on the entity
-        fireChannel() - fire a channel "manually" from within another channel
+    Attributes:
+        _names
+        _enabled
+        _is_modified
+        _scheduler
+        _simulator
+        _curr_channel
 
     """
-    def __init__(self, time, state, network):
-        if any([network[channel] < time for channel in network]):
-            raise SimulationError("Cannot create entity: some channel's event time precedes the entity's clock.")
-        self.clock = time
-        self.state = state
-        self.network = network
-        self.is_enabled = True
-        self.is_modified = False
-        self._prev_channel = None
+    def __init__(self, state_names, scheduler, simulator):
+        self._names = state_names
+        self._scheduler = scheduler
+        self._simulator = simulator
+        self._enabled = True
+        self._is_modified = False
+        self._curr_channel = None
+        for name in state_names:
+            setattr(self, name, None)
 
-    def start(self):
-        self.is_enabled = True
+    @property
+    def _time(self):
+        return self._scheduler.clock
 
-    def stop(self):
-        self.is_enabled = False
+    @property
+    def _next_event_time(self):
+        return self._scheduler.next()[1]
 
-    def fireChannel(self, name, cargo, t_fire, queue, source=None):
+    def _scheduleAllChannels(self):
         """
-        Fire a channel "manually". Rescheduling dependencies will be invoked if
-        the channel modifies the entity. However, cross-dependencies (i.e., l2g
-        or g2l) will not be invoked.
-        NOTE: need to supply the firing time.
+        Schedule all channels belonging to the entity.
+        Return the earliest event time.
 
         """
-        channel = self.network.channel_dict[name]
-        if t_fire < self.clock:
-            raise FiringError(channel, self.clock, t_fire)
-        is_mod = channel.fireEvent(self, cargo, self.clock, t_fire, queue)
-        self.clock = t_fire
-
-        # reschedule channel that just fired
-        event_time = channel.scheduleEvent(self, cargo, self.clock, source)
-        if event_time < self.clock:
-            raise SchedulingError(channel, self.clock, event_time)
-        self.network[channel] = event_time
-
-        # reschedule dependent channels
-        if is_mod:
-            for dependent in self.network.dep_graph[channel]:
-                event_time = dependent.scheduleEvent(self, cargo, self.clock, source)
-                if event_time < self.clock:
-                    raise SchedulingError(dependent, self.clock, event_time)
-                self.network[dependent] = event_time
-
-    def scheduleAllChannels(self, cargo, source=None):
+        scheduler = self._scheduler
+        simulator = self._simulator
+        cargo = simulator.agents if isinstance(self, World) else simulator.world
         tmin = float('inf')
         cmin = None
-        for channel in self.network:
-            event_time = channel.scheduleEvent(self, cargo, self.clock, source)
-            if event_time < self.clock:
-                raise SchedulingError(channel, self.clock, event_time)
-            elif event_time < tmin:
-                tmin = event_time
+        for channel in scheduler:
+            scheduler[channel] = tsched = channel.scheduleEvent(self, cargo, scheduler.clock, None)
+            if tsched < tmin:
+                tmin = tsched
                 cmin = channel
-            self.network[channel] = event_time
         return tmin
 
-    def fireNextChannel(self, cargo, queue):
-        cmin, tmin = self.network.getMin()
+    def _processNextChannel(self):
+        """
+        Fire the earliest channel.
+        Advance the clock to the event time.
+        Enqueue any cloned agents and process immediately if possible.
+        Reschedule the channel.
+        Reschedule internal dependent channels if entity was changed.
+
+        """
+        scheduler = self._scheduler
+        simulator = self._simulator
+        cargo = simulator.agents if isinstance(self, World) else simulator.world
+        # get next channel
+        cnext, event_time = scheduler.next()
+        self._curr_channel = cnext
+        self._curr_event_time = event_time
         # fire channel
-        self.is_modified = cmin.fireEvent(self, cargo, self.clock, tmin, queue)
-        self.clock = tmin
+        self._is_modified = cnext.fireEvent(self, cargo, scheduler.clock, event_time)
+        scheduler.clock = event_time
+        if cnext._new_agents:
+            # enqueue offspring
+            self._enqueue_new_agents(cnext)
+        if isinstance(simulator, FMSimulator) or isinstance(self, World):
+            # process new agents
+            simulator._processAgentQueue()
+        # reschedule
+        scheduler[cnext] = cnext.scheduleEvent(self, cargo, scheduler.clock, None)
+        if self._is_modified:
+            for dependent in scheduler.dep_graph[cnext]:
+                scheduler[dependent] = dependent.scheduleEvent(self, cargo, scheduler.clock, None)
 
-        # reschedule channel that just fired
-        event_time = cmin.scheduleEvent(self, cargo, self.clock, None)
-        if event_time < self.clock:
-            raise SchedulingError(cmin, self.clock, event_time)
-        self.network[cmin] = event_time
+    def _fire_nested(self, channel, event_time, reschedule=False, source=None, **kwargs):
+        """
+        Fire the nested channel provided.
+        Enqueue any cloned agents and process immediately if possible.
+        If specified, reschedule the channel and internal dependent channels.
+        ***Only advance the clock if rescheduling takes place!
+        """
+        scheduler = self._scheduler
+        if channel not in scheduler:
+            raise SimulationError
+        simulator = self._simulator
+        cargo = simulator.agents if isinstance(self, World) else simulator.world
+        # fire channel
+        is_modified = channel.fireEvent(self, cargo, scheduler.clock, event_time, **kwargs)
+        if channel._new_agents:
+            # enqueue offspring
+            self._enqueue_new_agents(channel)
+        if isinstance(simulator, FMSimulator) or isinstance(self, World):
+            # process new agents
+            simulator._processAgentQueue()
+        if reschedule:
+            scheduler.clock = event_time #Advance clock ONLY if we are rescheduling!!!
+            scheduler[channel] = channel.scheduleEvent(self, cargo, scheduler.clock, source)
+            if is_modified:
+                for dependent in scheduler.dep_graph[channel]:
+                    scheduler[dependent] = dependent.scheduleEvent(self, cargo, scheduler.clock, source)
+        return is_modified
 
-        # remember channel that just fired
-        self._prev_channel = cmin
+    def _reschedule(self, channel, dependents=False, source=None):
+        """
+        Reschedule the channel provided.
+        Reschedule internal dependent channels if specified.
+        """
+        scheduler = self._scheduler
+        if channel not in scheduler:
+            raise SimulationError
+        simulator = self._simulator
+        cargo = simulator.agents if isinstance(self, World) else simulator.world
+        # reschedule specified channel
+        scheduler[channel] = channel.scheduleEvent(self, cargo, scheduler.clock, source)
+        # reschedule its internal dependent channels
+        if dependents:
+            for dependent in scheduler.dep_graph[channel]:
+                scheduler[dependent] = dependent.scheduleEvent(self, cargo, scheduler.clock, source)
 
-    def rescheduleDependentChannels(self, cargo, source=None):
-        if self.is_modified:
-            for dependent in self.network.dep_graph[self._prev_channel]:
-                # reschedule dependent channel
-                event_time = dependent.scheduleEvent(self, cargo, self.clock, source)
-                if event_time < self.clock:
-                    raise SchedulingError(dependent, self.clock, event_time)
-                self.network[dependent] = event_time
+    def _enqueue_new_agents(self, channel):
+        scheduler = self._scheduler
+        while channel._new_agents:
+            d = channel._new_agents.pop(0)
+            self._prepare_new_agent(d)
+            q = self._simulator.agent_queue
+            q.enqueue(q.ADD_AGENT, d, channel._event_time) # parent=self
 
-    def _get_next_event_time(self):
-        cmin, tmin = self.network.getMin()
-        return tmin
-    next_event_time = property(fget=_get_next_event_time)
+    def _prepare_new_agent(self, new_agent):
+        scheduler = new_agent._scheduler
+        if isinstance(self, Agent):
+            channel = new_agent._curr_channel
+            world = new_agent._simulator.world
+            scheduler[channel] = channel.scheduleEvent(new_agent, world, scheduler.clock, None)
+            if self._is_modified:
+                for dependent in scheduler.dep_graph[channel]:
+                    scheduler[dependent] = dependent.scheduleEvent(new_agent, world, scheduler.clock, None)
+        if isinstance(self, LoggedAgent):
+            new_agent._logger.record(scheduler.clock, new_agent._curr_channel._id, new_agent)
 
+    # def _rescheduleFired(self, dependents=True, source=None):
+    #     # reschedule channel that just fired and dependent channels
+    #     scheduler = self._scheduler
+    #     simulator = self._simulator
+    #     cargo = simulator.agents if isinstance(self, World) else simulator.world
+    #     channel = self._curr_channel
+    #     scheduler[channel] = channel.scheduleEvent(self, cargo, firing_time, source)
+    #     if dependents:
+    #         for dependent in scheduler.dep_graph[channel]:
+    #             scheduler[dependent] = dependent.scheduleEvent(self, cargo, scheduler.clock, source)
 
-class World(Entity):
+    # def _fire(self, channel_name, **kwargs):
+    #   """ NOTE: cross-dependencies (i.e., l2g or g2l) will not be invoked. """
+    #   scheduler = self._scheduler
+    #   firing_time = scheduler.clock # need to supply
+    #   cargo = self._simulator.agents
+    #   # fire specified channel
+    #   channel = scheduler.channel_dict[channel_name]
+    #   self._curr_channel = channel
+    #   time = scheduler.clock
+    #   scheduler.clock = firing_time
+    #   self._is_modified = channel.fireEvent(self, cargo, time, firing_time, **kwargs)
+
+    # def _resched(self, channel_name, source=None, dependents=False):
+    #   """ NOTE: cross-dependencies (i.e., l2g or g2l) will not be invoked. """
+    #   scheduler = self._scheduler
+    #   cargo = self._simulator.agents
+    #   # find specified channel
+    #   channel = scheduler.channel_dict[channel_name]
+    #   # reschedule channel and dependent channels
+    #   scheduler[channel] = channel.scheduleEvent(self, cargo, scheduler.clock, source)
+    #   if dependents:
+    #   for dependent in scheduler.dep_graph[channel]:
+    #       scheduler[dependent] = dependent.scheduleEvent(self, cargo, scheduler.clock, source)
+
+class World(BaseEntity):
     """
     World entity.
 
-    Attributes:
-        clock       (float)
-        state       (cps.state.State)
-        network     (cps.entity.ChannelNetwork)
-        is_enabled  (bool)
-        is_modified (bool)
+    """
+    def _rescheduleFromAgent(self, source_agent=None):
+        # reschedule agent-dependent world channels
+        scheduler = self._scheduler
+        agents = self._simulator.agents
+        for wchannel in source_agent._getDependentWCs():
+            scheduler[wchannel] = wchannel.scheduleEvent(self, agents, scheduler.clock, source_agent)
+
+class Agent(BaseEntity):
+    """
+    Agent entity. Agents can be copied so as to introduce new offspring into
+    the population or queued up for removal from the population. They can also 
+    synchronize their schedulers to the world clock before a world event.
+
+    Additional attributes:
+        _parent (temporary marker on a cloned agent)
 
     """
-    def crossScheduleL2G(self, cargo, source_agent):
-        """
-        Takes as input the agent who fired the offending event.
-        Reschedules affected world channels.
-
-        """
-        if source_agent.is_modified:
-            prev_channel = source_agent._prev_channel
-            for world_channel in source_agent.network.l2g_graph[prev_channel]:
-                # reschedule world channel that depends on source agent
-                event_time = world_channel.scheduleEvent(self, cargo, self.clock, source_agent)
-                if event_time < self.clock:
-                    raise SchedulingError(world_channel, self.clock, event_time)
-                self.network[world_channel] = event_time
-
-    def crossScheduleL2GAsync(self, cargo, world_channels):
-        """
-        Different version for the Asynchronous Method algorithm.
-        This takes the collection of world channels to reschedule as input
-        rather than the agents who fired the offending events.
-
-         """
-        for world_channel in world_channels:
-            event_time = world_channel.scheduleEvent(self, cargo, self.clock, source_agent)
-            if event_time < self.clock:
-                raise SchedulingError(world_channel, self.clock, event_time)
-            self.network[world_channel] = event_time
-
-
-class Agent(Entity):
-    """
-    Agent entity. Agents can be cloned so as to introduce new offspring into
-    the population. They also need to be synchronized before a world event.
-
-    Attributes:
-        clock       (float)
-        state       (cps.state.State)
-        network     (cps.entity.ChannelNetwork)
-        is_enabled  (bool)
-        is_modified (bool)
-
-    External API:
-        stop()
-        fireChannel()
-        clone()
-
-    """
-    def __init__(self, time, state, network):
-        super(Agent, self).__init__(time, state, network)
+    def __init__(self, state_names, scheduler, simulator):
+        super(Agent, self).__init__(state_names, scheduler, simulator)
         self._parent = None
+
+    def _getDependentWCs(self):
+        return self._scheduler.l2g_graph[self._curr_channel] if self._is_modified else ()
+
+    def _rescheduleFromWorld(self, world):
+        # reschedule world-dependent local channels
+        scheduler = self._scheduler
+        if world._is_modified:
+            for channel in scheduler.g2l_graph[world._curr_channel]:
+                scheduler[channel] = channel.scheduleEvent(self, world, scheduler.clock, world)
+
+    def _synchronize(self, tbarrier):
+        """
+        This should mimic a channel firing a set of nested channels with t0=clock and tf=tbarrier.
+        Sync channels are fired with the same initial time:
+            Enqueue any cloned agents and process immediately if possible.
+        Rescheduling is invoked after each firing:
+            Reschedule the sync channel at the event time.
+            Reschedule internal dependent channels if entity was changed.
+            In FM method, ALSO reschedule dependent world channels if entity was changed.
+        The clock is advanced to tbarrier.
+
+        """
+        # NOTE: we do not allow sync channels to have other sync channels as dependents!
+        scheduler = self._scheduler
+        simulator = self._simulator
+        world = simulator.world
+        # current time
+        time = scheduler.clock
+        # advance clock to sync barrier
+        scheduler.clock = tbarrier
+        if scheduler.sync_channels:
+            for channel in scheduler.sync_channels:
+                # fire channel with t0=time, tf=tbarrier
+                self._is_modified = channel.fireEvent(self, world, time, tbarrier)
+                self._enqueue_new_agents(channel)
+                if isinstance(simulator, FMSimulator):
+                    simulator._processAgentQueue()
+                # reschedule internal
+                scheduler[channel] = channel.scheduleEvent(self, world, scheduler.clock, None)
+                if self._is_modified:
+                    for dependent in scheduler.dep_graph[channel]:
+                        scheduler[dependent] = dependent.scheduleEvent(self, world, scheduler.clock, None)
+                # reschedule A2W if is modified
+                if isinstance(simulator, FMSimulator) and self._is_modified:
+                    world._rescheduleFromAgent(self)
 
     def __copy__(self):
-        time = self.clock
-        state = copy(self.state)
-        network = copy(self.network) #copies event schedule + cached min element
-        other = Agent(time, state, network)
+        """
+        Copy the scheduler and the state variables.
+
+        """
+        names = self._names
+        scheduler = copy(self._scheduler)
+        simulator = self._simulator
+        other = self.__class__(names, scheduler, simulator)
+        for name in names:
+            setattr(other, name, copy(getattr(self, name)))
+        # The following ugly hack preserves the identity of currently firing channel
+        if self._curr_channel is not None:
+            other._curr_channel = other._scheduler.channel_dict[self._curr_channel._id]
         return other
 
-    def clone(self):
-        # Cloned agents are bound to their parent before they are added to the
-        # population. This marker should be removed when the new agent is added.
-        if self._parent is not None:
-            raise SimulationError("Cannot clone an agent that is not in the population.")
-        other = self.__copy__()
-        other._parent = self
-        return other
-
-    def finalizePrevEvent(self):
-        """ Called by simulator after a cloned agent is popped from queue """
-        # Get the channel that cloned the agent (i.e. is still firing right now)
-        channel, event_time = self.network.getMin()
-        # NOTE: In principle, doing this could yield the wrong channel when
-        #       there is a tie for the min event. But we are OK because we mirrored
-        #       the cached min channel when the agent was cloned (see ChannelNetwork.__copy__).
-        #       If this behavior changes, it could cause a subtle bug.
-
-        self._prev_channel = channel
-        self.clock = event_time
-
-        # Assume we always want to invoke dependencies on the new agent. It doesn't hurt anyway.
-        self.is_modified = True
-
-        # Remove marker (unbind the parent)
-        self._parent = None
-
-    def reschedulePrevChannel(self, cargo, source=None):
-        """ Called by simulator after a cloned agent is popped from queue """
-        prev = self._prev_channel
-        event_time = prev.scheduleEvent(self, cargo, self.clock, source)
-        if event_time < self.clock:
-            raise SchedulingError(prev_channel, self.clock, event_time)
-        self.network[prev] = event_time
-
-    def synchronize(self, tbarrier, world, queue, source=None):
-        """
-        Synchronize time-driven channels by firing them at a specified time
-        barrier.
-
-        """
-        for channel in self.network.sync_channels:
-            is_mod = channel.fireEvent(self, world, self.clock, tbarrier, queue)
-            if is_mod:
-                for dependent in self.network.dep_graph[channel]:
-                    # NOTE:some of these rescheds may be redundant if any of the dependents
-                    # are sync channels that are still waiting to fire in the outer loop...
-                    event_time = dependent.scheduleEvent(self, world, tbarrier, source)
-                    if event_time < self.clock:
-                        raise SchedulingError(dependent, tbarrier, event_time)
-                    self.network[dependent] = event_time
-        self.clock = tbarrier
-
-    def crossScheduleG2L(self, cargo, world):
-        """
-        Takes as input the world entity which fired an offending event.
-        Reschedules affected agent channels.
-
-        """
-        if world.is_modified:
-            prev_channel = world._prev_channel
-            for agent_channel in self.network.g2l_graph[prev_channel]:
-                # reschedule world-dependent local channels
-                event_time = agent_channel.scheduleEvent(self, cargo, self.clock, world)
-                if event_time < self.clock:
-                    raise SchedulingError(agent_channel, self.clock, event_time)
-                self.network[agent_channel] = event_time
-
-    def getDependentChannels(self):
-        return self.network.dep_graph[self._prev_channel]
-
-    def getDependentWorldChannels(self):
-        return self.network.l2g_graph[self._prev_channel]
+    def _kill(self, event_time, remove=True):
+        self._scheduler.enabled = False
+        if remove:
+            q = self._simulator.agent_queue
+            q.enqueue(q.DELETE_AGENT, self, event_time)
 
 
-class LoggingAgent(Agent):
+class LoggedAgent(Agent):
     """
     Agent entity subclass that logs every event to create a lineage tree of
     state and event histories.
 
     Additional attributes:
-        node    (cps.state.LoggerNode)
+        _logger   (cps.logging.LoggerNode)
 
     """
-    def __init__(self, time, state, network, logger=None):
-        super(LoggingAgent, self).__init__(time, state, network)
-        self.node = logger
+    def __init__(self, state_names, scheduler, simulator, logger=None):
+        super(LoggedAgent, self).__init__(state_names, scheduler, simulator)
+        self._logger = logger
 
     def __copy__(self):
-        time = self.clock
-        state = copy(self.state)
-        network = copy(self.network)
-        other = LoggingAgent(time, state, network)
-
-        # Branch datalog into two new nodes
-        l_node, r_node = self.node.branch()
-        self.node = l_node
-        other.node = r_node
+        other = super(LoggedAgent, self).__copy__()
+        l_node, r_node = self._logger.branch()
+        self._logger = l_node
+        other._logger = r_node
         return other
 
-    def fireChannel(self, name, cargo, t_fire, queue, source=None):
-        super(LoggingAgent, self).fireChannel(name, cargo, t_fire, queue, source)
-        self.node.record(self.clock, self.network.channel_dict[name].id, self.state) #SHOULD THESE BE RECORDED?
+    def _processNextChannel(self):
+        super(LoggedAgent, self)._processNextChannel()
+        scheduler = self._scheduler
+        self._logger.record(scheduler.clock, self._curr_channel._id, self)
 
-    def fireNextChannel(self, cargo, queue):
-        super(LoggingAgent, self).fireNextChannel(cargo, queue)
-        self.node.record(self.clock, self._prev_channel.id, self.state)
+    def _fire_nested(self, channel, event_time, reschedule=False, source=None, **kwargs):
+        super(LoggedAgent, self)._fire_nested(channel, event_time, reschedule, source, **kwargs)
+        scheduler = self._scheduler
+        self._logger.record(scheduler.clock, self._curr_channel._id, self)
 
-        # NOTE FOR CLONING EVENTS: the final state of the first new agent (self)
-        #   at the completion of the division event gets logged as the first
-        #   event on its new datalog.
-        #
-        # We don't have access to the cloned agent in the fireNextChannel()
-        # method. It should be lying in the agent queue. Its first event is
-        # "incomplete" because it doesn't get finalized when fireNextChannel()
-        # returns. Instead, the event is finalized when the agent is retrieved
-        # from the queue using finalizePrevEvent(): we record its state to its
-        # datalog.
-
-    def finalizePrevEvent(self):
-        super(LoggingAgent, self).finalizePrevEvent()
-        # Log the event that caused division, recording final state of the newborn
-        self.node.record(self.clock, self._prev_channel.id, self.state)
+    # NOTE FOR CLONING EVENTS: the final state of the first new agent
+    #   at the completion of the division event gets logged as the first
+    #   event on its new logger.
+    #
+    # The following records the final state of the second agent before it
+    # is added to the agent queue
+    # def _prepare_new_agent(self, other):
+    #     super(LoggedAgent, self)._prepare_new_agent(self, other)
+    #     scheduler = other._scheduler
+    #     other.logger.record(scheduler.clock, other._curr_channel.id, other)
 
 
+# user API for agents, world
+# def fire(entity, *args, **kwargs):
+#     entity._fire(*args, **kwargs)
 
-#-------------------------------------------------------------------------------
-# Priority queue for adding/removing agents from the population
+# def reschedule(entity, *args, **kwargs):
+#     entity._resched(*args, **kwargs)
 
-class AgentQueue(object):
-    """
-    A queue of agents to be introduced or removed from the population at
-    specified times according to the specified action. Agents are retrieved in
-    time-stamp order.
+# def clone(agent, *args, **kwargs):
+#     agent._clone(*args, **kwargs)
 
-    Constants:
-        ADD_AGENT
-        DELETE_AGENT
-
-    Attributes:
-        heap (list): binary heap holding agents
-
-    """
-    ADD_AGENT = 1
-    DELETE_AGENT = -1
-
-    class Entry(object):
-        def __init__(self, priority_key, item, action=None):
-            self.priority_key = priority_key
-            self.item = item
-            self.action = action
-
-        def __lt__(self, other):
-            return self.priority_key < other.priority_key
-
-    def __init__(self):
-        self.heap = []
-
-    def __len__(self):
-        return len(self.heap)
-
-    def enqueue(self, action, agent, priority_key):
-        if action == AgentQueue.ADD_AGENT:
-            if agent._parent:
-                heapq.heappush( self.heap, AgentQueue.Entry(priority_key, agent, action) )
-            else:
-                raise SimulationError("The agent queued for insertion is already in the population.")
-        elif action == AgentQueue.DELETE_AGENT:
-            if agent._parent:
-                raise SimulationError("The agent queued for deletion is not in the population.")
-            else:
-                agent.stop()
-                heapq.heappush( self.heap, AgentQueue.Entry(priority_key, agent, action) )
-        else:
-            raise SimulationError("Invalid action.")
-
-    def dequeue(self):
-        try:
-            entry = heapq.heappop( self.heap )
-        except IndexError:
-            raise KeyError
-        return entry.action, entry.item
+# def kill(agent, *args, **kwargs):
+#     agent._kill(*args, **kwargs)
