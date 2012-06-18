@@ -30,23 +30,21 @@ class GillespieChannel(AgentChannel):
         self.tau = None
         self.mu = None
 
-    def scheduleEvent(self, cell, gdata, time, src):
-        a = self.propensity_fcn(cell.state.x, gdata.state.p)
+    def scheduleEvent(self, cell, gdata, time, src): #keyword!
+        a = self.propensity_fcn(cell.x, gdata)
         a0 = sum(a)
         self.tau = -math.log(random.uniform(0,1))/a0
-
         r0 = random.uniform(0,1)*a0
         self.mu = 0; s = a[0]
         while s <= r0:
             self.mu += 1
             s += a[self.mu]
-
         return time + self.tau
 
-    def fireEvent(self, cell, gdata, time, event_time, q):
-        cell.fireChannel('VolumeChannel', gdata, event_time, q)
-        for i in range(0, len(cell.state.x)):
-            cell.state.x[i] += self.stoich_list[self.mu][i]
+    def fireEvent(self, cell, gdata, time, event_time):
+        self.fire(cell, 'VolumeChannel')
+        for i in range(0, len(cell.x)):
+            cell.x[i] += self.stoich_list[self.mu][i]
         return True
 
 class VolumeChannel(AgentChannel):
@@ -57,8 +55,8 @@ class VolumeChannel(AgentChannel):
     def scheduleEvent(self, cell, gdata, time, src):
         return time + self.tstep
 
-    def fireEvent(self, cell, gdata, time, event_time, q):
-        cell.state.v *= math.exp(gdata.state.p['kV']*(event_time-time))
+    def fireEvent(self, cell, gdata, time, event_time):
+        cell.v *= math.exp(gdata.kV*(event_time-time))
         return True
 
 class DivisionChannel(AgentChannel):
@@ -67,19 +65,18 @@ class DivisionChannel(AgentChannel):
         self.prob = prob
 
     def scheduleEvent(self, cell, gdata, time, src):
-        return time + math.log(cell.state.v_thresh/cell.state.v)/gdata.state.p['kV']
+        return time + math.log(cell.v_thresh/cell.v)/gdata.kV
 
-    def fireEvent(self, cell, gdata, time, event_time, q):
-        cell.fireChannel('VolumeChannel', gdata, event_time, q) #BUG HERE!!!!
-        new_cell = cell.clone()
-        v_mother = cell.state.v
-        cell.state.v, new_cell.state.v = self.prob*v_mother, (1-self.prob)*v_mother
-        cell.state.v_thresh = 2 + random.normalvariate(0, 0.15)
-        new_cell.state.v_thresh = 2 + random.normalvariate(0, 0.15)
-        x_mother = cell.state.x[:]
-        cell.state.x[0], new_cell.state.x[0] = self._binomialPartition(x_mother[0])
-        cell.state.x[1], new_cell.state.x[1] = self._binomialPartition(x_mother[1])
-        q.enqueue(q.ADD_AGENT, new_cell, event_time)
+    def fireEvent(self, cell, gdata, time, event_time):
+        self.fire(cell,'VolumeChannel')
+        new_cell = self.cloneAgent(cell)
+        v_mother = cell.v
+        cell.v, new_cell.v = self.prob*v_mother, (1-self.prob)*v_mother
+        cell.v_thresh = 2 + random.normalvariate(0, 0.15)
+        new_cell.v_thresh = 2 + random.normalvariate(0, 0.15)
+        x_mother = cell.x[:]
+        cell.x[0], new_cell.x[0] = self._binomialPartition(x_mother[0])
+        cell.x[1], new_cell.x[1] = self._binomialPartition(x_mother[1])
         return True
 
     def _binomialPartition(self, n):
@@ -89,105 +86,78 @@ class DivisionChannel(AgentChannel):
         return num_heads, num_tails
 
 
-class SVDModelRecorder(Recorder):
-    """ Saves population snapshots """
-    def __init__(self):
-        self._agent_vars = ('x1','x2','v')
-        self._world_vars = ()
-        self.time = []
-        self.x1 = []
-        self.x2 = []
-        self.v = []
+def my_init(gdata, cells):
+    gdata.kR = 0.01
+    gdata.kP = 1
+    gdata.gR = 0.1
+    gdata.gP = 0.002
+    gdata.kV = 0.0002
+    for cell in cells:
+        cell.x = [0, 0]
+        cell.v = math.exp(random.uniform(0,math.log(2)))
+        cell.v_thresh = 2
+        #cell.t_last = 0
 
-    def record(self, time, gdata, cells):
-        self.time.append(time)
-        self.x1.append([copy(cell.state.x[0]) for cell in cells])
-        self.x2.append([copy(cell.state.x[1]) for cell in cells])
-        self.v.append([copy(cell.state.v) for cell in cells])
+def my_logger(log, time, agent):
+    log['x0'].append(agent.x[0])
+    log['x1'].append(agent.x[1])
+    log['v'].append(agent.v)
 
+def my_recorder(log, time, world, agents):
+    log['x0'].append([agent.x[0] for agent in agents])
+    log['x1'].append([agent.x[1] for agent in agents])
+    log['v'].append([agent.v for agent in agents])
 
+def prop_fcn(x, p):
+    return [ p.kR,
+             p.kP*x[0],
+             p.gR*x[0],
+             p.gP*x[1] ]
 
+s = (( 1, 0 ),
+     ( 0, 1 ),
+     (-1, 0 ),
+     ( 0,-1 ))
 
-#-------------------------------------------------------------------------------
-def main():
-    s = (( 1, 0 ),
-         ( 0, 1 ),
-         (-1, 0 ),
-         ( 0,-1 ))
+recorder = Recorder([], ['x0','x1','v'], my_recorder)
+rc = RecordingChannel(tstep=50, recorder=recorder)
+gc = GillespieChannel(propensity_fcn=prop_fcn, stoich_list=s)
+vc = VolumeChannel(tstep=5)
+dc = DivisionChannel(prob=0.5)
 
-    def prop_fcn(x, p):
-        return [ p['kR'],
-                 p['kP']*x[0],
-                 p['gR']*x[0],
-                 p['gP']*x[1] ]
-
-    def init(cells, gdata, p):
-        # initialize simulation entities
-        gdata.state.p = {'kR':0.01,
-                         'kP':1,
-                         'gR':0.1,
-                         'gP':0.002,
-                         'kV':0.0002}
-        for cell in cells:
-            cell.state.x = [0, 0]
-            cell.state.v = math.exp(random.uniform(0,math.log(2)))
-            cell.state.v_thresh = 2
-            cell.state.t_last = 0
-
-    def my_logger(state):
-        return [state.x[0],state.x[1],state.v]
-
-
-    rc = RecordingChannel( 50, recorder=SVDModelRecorder() )
-    gc = GillespieChannel(prop_fcn, s)
-    vc = VolumeChannel(5)
-    dc = DivisionChannel(0.5)
-
-    model = Model(init_num_agents=10,
-                  max_num_agents=100,
-                  world_vars=('p'),
-                  agent_vars=('x', 'v', 'v_thresh', 't_last'),
-                  initializer=init,
-                  logger=my_logger,
-                  track_lineage=[0],
-                  parameters=[])
-
-    model.addWorldChannel(channel=rc,
-                          name='RecordingChannel',
-                          ac_dependents=[],
-                          wc_dependents=[])
-    model.addAgentChannel(channel=gc,
-                          name='GillespieChannel',
-                          sync=False,
-                          ac_dependents=[],
-                          wc_dependents=[])
-    model.addAgentChannel(channel=vc,
-                          name='VolumeChannel',
-                          sync=True,
-                          ac_dependents=[],
-                          wc_dependents=[])
-    model.addAgentChannel(channel=dc,
-                          name='DivisionChannel',
-                          sync=False,
-                          ac_dependents=[gc,vc],
-                          wc_dependents=[])
-
-    mgr = AsyncMethodSimulator(model, 0) #FEMethodSimulator(model, 0)
-
-    t0 = time.time()
-    mgr.runSimulation(10000)
-    t = time.time()
-    print(t-t0)
-
-    recorder = rc.getRecorder()
-    root = mgr.root_nodes[0]
-
-    #save_snapshot('data/svd_data.hdf5', recorder)
-    save_lineage('data/svd_lineage.hdf5', root, ['x0','x1','v'])
+model = Model(n0=100, nmax=100)
+model.addInitializer(['kP','kR','gP','gR','kV'], ['x','v','v_thresh'], my_init) #t_last
+model.addLogger(0, ['x0','x1','v'], my_logger)
+model.addRecorder(recorder)
+model.addWorldChannel(channel=rc,
+                      ac_dependents=[],
+                      wc_dependents=[])
+model.addAgentChannel(channel=gc,
+                      ac_dependents=[],
+                      wc_dependents=[])
+model.addAgentChannel(channel=vc,
+                      ac_dependents=[],
+                      wc_dependents=[],
+                      sync=True)
+model.addAgentChannel(channel=dc,
+                      ac_dependents=[gc,vc],
+                      wc_dependents=[])
 
 
 if __name__=='__main__':
-    main()
+    sim = FMSimulator(model, 0)
+    #sim = AMSimulator(model, 0)
+
+    t0 = time.time()
+    sim.runSimulation(10000)
+    t = time.time()
+    print(t-t0)
+    recorder = sim.recorders[0]
+    logger = sim.loggers[0]
+
+    savemat_snapshot('data/svd2_data.mat', recorder)
+    #savemat_lineage('data/svd_lineage.hdf5', logger)
+
 
 
 
