@@ -26,7 +26,7 @@ def _accumulate(root):
     Recording scheme originally devised by Andrei Anisenia.
 
     """
-    adjacency_list = root.traverse()
+    adjacency_list = root.adjacencyList()
     adj_data = []
     time_data = []
     event_data = []
@@ -48,31 +48,31 @@ def _accumulate(root):
                 state_data[name].extend(values)
         adj_data.append([pid, cid, row, num_events])
         row += num_events
-    return time_data, event_data, names, state_data, adj_data
 
+    sim_data = {'time':time_data, 'event':event_data, 'adj':adj_data}
+    sim_data['adj_info'] = ['parent_id', 'id', 'start_row', 'num_events']
+    sim_data.update(state_data)
+    return sim_data, names
 
 def savemat_lineage(filename, root_node):
-    time_data, event_data, names, state_data, adj_data = _accumulate(root_node)
-    all_data = {'time':time_data, 'event':event_data, 'adj_list':adj_data, 'adj_info':['parent_id', 'id', 'start_row', 'num_events']}
-    all_data.update(state_data)
-    scipy.io.savemat(filename, all_data, oned_as='column')
+    sim_data, _ = _accumulate(root_node)
+    scipy.io.savemat(filename, sim_data, oned_as='column')
 
 def savehdf_lineage(filename, root_node):
-    time_data, event_data, names, state_data, adj_data = _accumulate(root_node)
+    sim_data, names = _accumulate(root_node)
     with h5py.File(filename, 'w') as dfile:
         dfile = h5py.File(filename,'w')
         # Tree adjacency list
-        dfile.create_dataset(name='adj_info',
-                             data=np.array(['parent_id', 'id', 'start_row', 'num_events'], dtype=np.bytes_) )
-        dfile.create_dataset(name='adj_data',
-                             data=np.array(adj_data))
+        dfile.create_dataset( name='adj_info',
+                              data=np.array(sim_data['adj_info'], dtype=np.bytes_) )
+        dfile.create_dataset( name='adj_data',
+                              data=np.array(sim_data['adj']) )
 
         # Data
-        dfile.create_dataset(name='time',
-                             data=np.array(time_data))
-        dfile.create_dataset(name='event',
-                             data=np.array(event_data, dtype=np.bytes_) )
-
+        dfile.create_dataset( name='time',
+                              data=np.array(sim_data['time']) )
+        dfile.create_dataset( name='event',
+                              data=np.array(sim_data['event'], dtype=np.bytes_) )
         for name in names:
             dfile.create_dataset(name=name,
-                                 data=np.array(state_data[name]))
+                                 data=np.array(sim_data[name]))
