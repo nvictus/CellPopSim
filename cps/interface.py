@@ -16,32 +16,18 @@ Copyright:   (c) Nezar Abdennur 2012
 # Framework API
 
 class IChannel(object):
-    """
-    Query and modify simulation entity state.
-
-    """
     def scheduleEvent(self, entity, cargo, time, source):
-        """
-        Schedule a simulation event.
-        Return the putative time of the next event.
-
-        """
         raise NotImplementedError
 
     def fireEvent(self, entity, cargo, time, event_time, **kwargs):
-        """
-        Perform a simulation event.
-        Return True if the state of the entity was modified, else False.
-
-        """
         raise NotImplementedError
 
 class ILogger(object):
-    def record(self, time, world, agents):
+    def record(self, time, entity):
         raise NotImplementedError
 
-class IIinitializer(object):
-    def initialize(self, world, agents, *args, **kwargs):
+class IRecorder(object):
+    def record(self, time, world, agents):
         raise NotImplementedError
 
 class IModel(object):
@@ -61,9 +47,14 @@ class IModel(object):
         raise NotImplementedError
 
 class ISimulator(object):
+    def initialize(self):
+        raise NotImplementedError
+
     def runSimulation(self, tstop):
         raise NotImplementedError
 
+    def finalize(self):
+        raise NotImplementedError
 
 
 #-----------------------------------------------------------------------------
@@ -98,6 +89,9 @@ class IAgent(object):
     def _reschedule(self, channel_name, source=None):
         raise NotImplementedError
 
+    def _stop(self):
+        raise NotImplementedError
+
     def __copy__(self):
         raise NotImplementedError
 
@@ -105,35 +99,31 @@ class IAgent(object):
         raise NotImplementedError
 
 
-
 #-----------------------------------------------------------------------------
 # Internal API used by simulator
 
 class IExecWorld(object):   
-    def _scheduleAllChannels(self, agents):
+    def _scheduleAllChannels(self):
         raise NotImplementedError
 
-    def _fireNextChannel(self, agents): #needs source?
+    def _processNextChannel(self): #needs source?
         raise NotImplementedError
 
-    def _crossScheduleL2G(self, agents, dependent_wcs, source_agent=None):
+    def _rescheduleFromAgent(self, source_agent=None):
         raise NotImplementedError
 
 
 class IExecAgent(object):
-    def _scheduleAllChannels(self, world):
+    def _scheduleAllChannels(self):
         raise NotImplementedError
 
-    def _fireNextChannel(self, world): #needs source?
+    def _processNextChannel(self): #needs source?
         raise NotImplementedError
 
-    def _synchronize(self, world, tbarrier):
+    def _synchronize(self, tbarrier):
         raise NotImplementedError
 
-    def _getDependentWCs(self):
-        raise NotImplementedError
-
-    def _crossScheduleG2L(self, world):
+    def _rescheduleFromWorld(self, world):
         raise NotImplementedError
     
     #def _prepareNewAgent(self, world):

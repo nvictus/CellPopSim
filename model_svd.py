@@ -30,7 +30,7 @@ class GillespieChannel(AgentChannel):
         self.tau = None
         self.mu = None
 
-    def scheduleEvent(self, cell, gdata, time, src): #keyword!
+    def scheduleEvent(self, cell, gdata, time, src):
         a = self.propensity_fcn(cell.x, gdata)
         a0 = sum(a)
         self.tau = -math.log(random.uniform(0,1))/a0
@@ -86,6 +86,11 @@ class DivisionChannel(AgentChannel):
         return num_heads, num_tails
 
 
+
+# Create the model...
+
+model = Model(n0=100, nmax=100)
+
 def my_init(gdata, cells):
     gdata.kR = 0.01
     gdata.kP = 1
@@ -97,51 +102,38 @@ def my_init(gdata, cells):
         cell.v = math.exp(random.uniform(0,math.log(2)))
         cell.v_thresh = 2
         #cell.t_last = 0
+model.addInitializer(['kP','kR','gP','gR','kV'], ['x','v','v_thresh'], my_init) #t_last
 
 def my_logger(log, time, agent):
     log['x0'].append(agent.x[0])
     log['x1'].append(agent.x[1])
     log['v'].append(agent.v)
+model.addLogger(0, ['x0','x1','v'], my_logger)
 
 def my_recorder(log, time, world, agents):
     log['x0'].append([agent.x[0] for agent in agents])
     log['x1'].append([agent.x[1] for agent in agents])
     log['v'].append([agent.v for agent in agents])
+recorder = Recorder([], ['x0','x1','v'], my_recorder)
+model.addRecorder(recorder)
 
 def prop_fcn(x, p):
     return [ p.kR,
              p.kP*x[0],
              p.gR*x[0],
              p.gP*x[1] ]
-
 s = (( 1, 0 ),
      ( 0, 1 ),
      (-1, 0 ),
      ( 0,-1 ))
-
-recorder = Recorder([], ['x0','x1','v'], my_recorder)
 rc = RecordingChannel(tstep=50, recorder=recorder)
 gc = GillespieChannel(propensity_fcn=prop_fcn, stoich_list=s)
 vc = VolumeChannel(tstep=5)
 dc = DivisionChannel(prob=0.5)
-
-model = Model(n0=100, nmax=100)
-model.addInitializer(['kP','kR','gP','gR','kV'], ['x','v','v_thresh'], my_init) #t_last
-model.addLogger(0, ['x0','x1','v'], my_logger)
-model.addRecorder(recorder)
-model.addWorldChannel(channel=rc,
-                      ac_dependents=[],
-                      wc_dependents=[])
-model.addAgentChannel(channel=gc,
-                      ac_dependents=[],
-                      wc_dependents=[])
-model.addAgentChannel(channel=vc,
-                      ac_dependents=[],
-                      wc_dependents=[],
-                      sync=True)
-model.addAgentChannel(channel=dc,
-                      ac_dependents=[gc,vc],
-                      wc_dependents=[])
+model.addWorldChannel(channel=rc)
+model.addAgentChannel(channel=gc)
+model.addAgentChannel(channel=vc, sync=True)
+model.addAgentChannel(channel=dc, ac_dependents=[gc,vc])
 
 
 if __name__=='__main__':

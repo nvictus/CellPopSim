@@ -15,7 +15,6 @@ import math
 import random
 import time
 
-
 class PoissonProcessChannel(AgentChannel):
     def __init__(self, lambd):
         self.rate = lambd
@@ -36,7 +35,7 @@ class PoissonBirthChannel(AgentChannel):
 
     def fireEvent(self, cell, world, time, event_time, queue):
         cell.state.div_count += 1
-        queue.enqueue(queue.ADD_AGENT, cell.clone(), event_time)
+        queue.enqueue(ADD_AGENT, cell.clone(), event_time)
         return True
 
 class PoissonDeathChannel(AgentChannel):
@@ -48,7 +47,7 @@ class PoissonDeathChannel(AgentChannel):
 
     def fireEvent(self, cell, world, time, event_time, queue):
         cell.state.dead = True
-        queue.enqueue(queue.DELETE_AGENT, cell, event_time)
+        queue.enqueue(DELETE_AGENT, cell, event_time)
         return True
 
 class SyncChannel(WorldChannel):
@@ -59,29 +58,27 @@ class SyncChannel(WorldChannel):
         return False
 
 
-def initfcn(cells, world, p):
+def initfcn(world, cells):
     for cell in cells:
         cell.state.count = 0
         cell.state.div_count = 0
         cell.state.dead = False
 
+c1 = PoissonProcessChannel(0.2)
+c2 = PoissonBirthChannel(0.01)
+c3 = PoissonDeathChannel(0.002)
+w1 = SyncChannel()
+
+model = Model(init_num_agents=10, max_num_agents=1000)
+model.addInitializer([], ['count','div_count','dead'], initfcn)
+model.addWorldChannel(w1)
+model.addAgentChannel(c1)
+model.addAgentChannel(c2)
+model.addAgentChannel(c3)
+
 
 
 if __name__=='__main__':
-    model = Model(init_num_agents=10, max_num_agents=1000,
-                  agent_vars=('count','div_count','dead'), world_vars=(),
-                  initializer=initfcn)
-
-    c1 = PoissonProcessChannel(0.2)
-    c2 = PoissonBirthChannel(0.01)
-    c3 = PoissonDeathChannel(0.002)
-    w1 = SyncChannel()
-
-    model.addWorldChannel(w1)
-    model.addAgentChannel(c1)
-    model.addAgentChannel(c2)
-    model.addAgentChannel(c3)
-
     sim = AsyncMethodSimulator(model, 0)
     t0 = time.time()
     sim.runSimulation(10000)
@@ -89,7 +86,6 @@ if __name__=='__main__':
 
     print(t-t0)
     print(sim.num_agents)
-    print(sim.theoretical_size)
 
 
 

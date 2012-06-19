@@ -1,3 +1,11 @@
+"""
+Name:        save
+
+Author:      Nezar Abdennur <nabdennur@gmail.com>
+Created:     
+Copyright:   (c) Nezar Abdennur 2012
+
+"""
 #!/usr/bin/env python
 #-------------------------------------------------------------------------------
 # These functions convert recorded data into numpy arrays and save them to disk
@@ -7,18 +15,9 @@ import scipy.io
 import h5py
 
 
-def savemat_snapshot(filename, recorder):
-    scipy.io.savemat(filename, recorder.log, oned_as='column')
-
-def savehdf_snapshot(filename, recorder):
-    with h5py.File(filename, 'w') as dfile:
-        for name, data in recorder.log.items():
-            dfile.create_dataset(name=name, data=np.array(data))
-
-
 def _accumulate(root):
     """
-    Traverses datalog tree and restructures the simulation data -- for each
+    Traverses logger tree and restructures the simulation data -- for each
     state variable, the event history of all the cells is concatenated and
     flattened into a single column of data.
     An adjacency list with index pointers (starting row, number of rows) is also
@@ -76,3 +75,11 @@ def savehdf_lineage(filename, root_node):
         for name in names:
             dfile.create_dataset(name=name,
                                  data=np.array(sim_data[name]))
+
+def savemat_snapshot(filename, recorder):
+    scipy.io.savemat(filename, recorder.log, oned_as='column')
+
+def savehdf_snapshot(filename, recorder):
+    with h5py.File(filename, 'w') as dfile:
+        for name, data in recorder.log.items():
+            dfile.create_dataset(name=name, data=np.array(data))

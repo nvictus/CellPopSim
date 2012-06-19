@@ -22,7 +22,7 @@ class BaseSimulator(object):
 
     Attributes:
         num_agents       (int)
-        max_num_agents   (int)
+        num_agents_max   (int)
         world            (cps.entity.World)
         agents           (list-of-cps.entity.Agent)
         loggers          (list-of-cps.state.LoggerNode)

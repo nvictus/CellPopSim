@@ -20,28 +20,23 @@ class Model(object):
     Specify an agent-based model.
 
     The Model constructor requires the following:
-        init_num_agents (int): the initial number of agents to create
-        max_num_agents (int): the maximum number of agents allowed
+        n0   (int): the initial number of agents to create
+        nmax (int): the maximum number of agents allowed
 
     A functional model also needs:
-    *addInitializer() to add a state initializer
-        world_vars (list-of-string): names of world state variables
-        agent_vars (list-of-string): names of agent state variables
-        initializer (callable): a user-defined function to initialize the states
-                                of the world and agents
+    1. An initializer: 
+        addInitializer() to add a state initializer
 
-    The next thing to be added are the simulation channels. These require
-    information including a qualified name and global and local dependencies:
-    *addWorldChannel() to add a world channel
-    *addAgentChannel() to add an agent channel
+    2. Simulation Channels:
+        addWorldChannel() to add a world channel
+        addAgentChannel() to add an agent channel
 
-    The following are optional:
-    *addLogger() to trace the state and event history of an agent and its descendants
-        logger (callable): user-defined function that returns state data to be
-                           logged after each event [the default logger records
-                           all agent state variables]
-    *addRecorder() to record population snapshot data
-        recorders (cps.state.Recorder): instance that logs population-scale data
+    Optional:
+    3. Loggers:
+        addLogger() to attach a logger to an agent to monitor it and its descendants
+
+    4. Recorders:
+        addRecorder() to add a recorder to the simulator
 
     """
     WorldType = cps.entity.World
@@ -55,16 +50,27 @@ class Model(object):
             raise ValueError("Must have initial # agents <= maximum # agents.")
         self.n0 = n0
         self.nmax = nmax
-
         self.world_vars = ()
         self.agent_vars = ()
         self.initializer = lambda x,y: None
-        self.world_channel_table = {}
-        self.agent_channel_table = {}
         self.logged = {}
         self.recorders = []
+        self.world_channel_table = {}
+        self.agent_channel_table = {}
 
     def addInitializer(self, world_varnames, agent_varnames, init_fcn, *args):
+        """
+        Add a function to initialize the states of the world and agent entities.
+        The simulator will use this before a simulation run begins.
+
+        Arguments:
+            world_vars (list-of-string): names of world state variables
+            agent_vars (list-of-string): names of agent state variables
+            init_fcn   (callable): a user-defined function with signature f(world, agents, ...)
+        Optional:
+            *args: extra arguments to be passed to the init_fcn
+
+        """
         self.world_vars = world_varnames
         self.agent_vars = agent_varnames
         self.initializer = lambda x,y: init_fcn(x, y, *args)
@@ -72,6 +78,13 @@ class Model(object):
     def addWorldChannel(self, channel, name=None, wc_dependents=[], ac_dependents=[]):
         """
         Add a world channel instance to the model.
+
+        Arguments:
+            channel (cps.channel.WorldChannel)
+        Optional:
+            name (default=class's name): a unique key to identify a channel from the other world channels 
+            wc_dependents (default=[]): a list of world channel instances that depend on this world channel
+            ac_dependents (default=[]): a list of agent channel instances that depend on this world channel
 
         """
         if name is None:
@@ -88,6 +101,14 @@ class Model(object):
     def addAgentChannel(self, channel, name=None, wc_dependents=[], ac_dependents=[], sync=False):
         """
         Add an agent channel instance to the model.
+        Each agent will receive a copy of the instance provided.
+
+        Arguments:
+            channel (cps.channel.AgentChannel)
+        Optional:
+            name (default=class's name): a unique key to identify a channel from the other agent channels 
+            wc_dependents (default=[]): a list of world channel instances that depend on this agent channel
+            ac_dependents (default=[]): a list of agent channel instances that depend on this agent channel
 
         """
         if name is None:
@@ -102,13 +123,34 @@ class Model(object):
         self.agent_channel_table[name] = _ChannelEntry(channel, wc_dependents, ac_dependents, sync)
 
     def addLogger(self, agent_index, logged_varnames, logging_fcn=None):
+        """
+        Monitor the event history of an agent and its offspring by attaching a logger to it.
+        The logging function is called after each channel firing to record custom information about 
+        the agent's state.
+
+        Arguments:
+            agent_index (int): index between 0 and n0 specifying which initial agent to track
+            logged_varnames (list-of-string): names of quantities being logged
+            logging_fcn (callable): a user-defined function with signature f(log, event_time, agent)
+
+        """
         if not 0 <= agent_index < self.nmax:
-            raise ValueError("Lineage to be tracked must be specified as an index between 0 and init_num_agents.")
+            raise ValueError("Agent lineage to be tracked must be specified as an index between 0 and n0.")
         self.logged[agent_index] = (logged_varnames, logging_fcn)
 
     def addRecorder(self, recorder):
-        self.recorders.append(recorder)
+        """
+        Record global information about the population state.
+        The simulator records information at the initial and final times of a simulation run.
+        World channels with a reference to the same recorder can be used to record the population
+        state at intervening times.
 
+        Arguments:
+            recorder (cps.channel.Recorder): recorder object that possesses a record method
+            The recording function has signature f(log, event_time, world, agents)
+
+        """
+        self.recorders.append(recorder)
 
 
 
@@ -150,68 +192,3 @@ def create_world(model, simulator, t_init):
     return model.WorldType(state_names, scheduler, simulator)
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-# example...
-def main():
-    def init(cells, gdata, data):
-        # initialize simulation entities
-        pass
-
-    def my_logger(state):
-        # decide what to record...make sure reference types are copied
-        return [state.x[:], state.y[0]]
-
-    w1 = WorldChannel()
-    w2 = WorldChannel()
-    a1 = AgentChannel()
-    a2 = AgentChannel()
-    a3 = AgentChannel()
-
-    model = Model(init_num_agents=2,
-                  max_num_agents=100,
-                  world_vars=['A', 'B', 'C'],
-                  agent_vars=['x', 'y', 'z'],
-                  initializer=init,
-                  logger=my_logger)
-
-    model.addWorldChannel('W1', w1, [], [w2])
-    model.addWorldChannel(name='W2',
-                          channel=w2,
-                          ac_dependents=[a1],
-                          wc_dependents=[])
-    model.addAgentChannel(name='A1',
-                          channel=a1,
-                          ac_dependents=[],
-                          wc_dependents=[w1],
-                          sync=True)
-    model.addAgentChannel(name='A2',
-                          channel=a2,
-                          ac_dependents=[a1,a3],
-                          wc_dependents=[])
-    model.addAgentChannel(name='A3',
-                          channel=a3,
-                          ac_dependents=[],
-                          wc_dependents=[])
-
-    print()
-
-if __name__ == '__main__':
-    main()
