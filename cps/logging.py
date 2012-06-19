@@ -31,6 +31,11 @@ def default_loggingfcn(log, time, entity):
         log[name].append( copy(getattr(entity, name)) ) 
 
 def _bfs_traversal(node):
+    """
+    Iterative breadth-first-search traversal of a binary tree.
+    Visits nodes in level-order.
+
+    """
     queue = []
     observed = set([None])
 
@@ -49,6 +54,13 @@ def _bfs_traversal(node):
     return
 
 def _dfs_traversal(node, order=-1):
+    """
+    Iterative depth-first-search traversal of a binary tree.
+        order == -1 : preorder visitation
+        order ==  0 : inorder visitation
+        order ==  1 : postorder visitation
+
+    """
     stack = []
     observed = set([None])
 
@@ -74,9 +86,12 @@ def _dfs_traversal(node, order=-1):
             yield node
     return
             
-def _dfs_traversal_recursive(node, order=-1):
+def _dfs_recursive(node, order=-1):
     """
-    Does recursive depth-first search of a binary tree.
+    Does recursive depth-first-search traversal of a binary tree.
+        order == -1 : preorder visitation
+        order ==  0 : inorder visitation
+        order ==  1 : postorder visitation
 
     """
     if node is not None:
@@ -97,7 +112,7 @@ class LoggerNode(object):
     """
     Logger keeps a log of events and recorded state over an agent's lifetime
     while linking to the logs of the agent's progeny. Logger nodes are linked
-    together as a binary tree.
+    together forming a binary tree.
 
     """
     def __init__(self, names, logging_fcn=None, parent=None):
@@ -133,19 +148,28 @@ class LoggerNode(object):
         self.rchild = r_node
         return l_node, r_node
 
-    def traverse(self, order=-1):
+    def traverseBFS(self):
         """
-        Returns an adjacency list (sequence of all [parent, child] pairs) for a root
-        tree node and all its descendants in a topological ordering of the nodes.
-            order == -1 : preorder visitation
-            order ==  0 : inorder visitation
-            order ==  1 : postorder visitation
+        Returns a generator that performs a breadth-first traversal over the tree
+        of logger nodes.
 
         """
-        # TODO: add other traversal methods/non-recursive implementations
         return _bfs_traversal(self)
 
+    def traverseDFS(self, order=-1):
+        """
+        Returns a generator that performs a depth-first traversal over the tree
+        of logger nodes.
+
+        """
+        return _dfs_traversal(self, order)
+
     def adjacencyList(self):
+        """ 
+        Returns an adjacency list (sequence of all [parent, child] pairs) for a root
+        tree node and all its descendants in a topological ordering of the nodes.
+
+        """
         nodes = _dfs_traversal(node)
         return [ (node.parent, node) for node in nodes]
 
