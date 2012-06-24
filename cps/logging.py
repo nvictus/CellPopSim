@@ -28,7 +28,7 @@ def default_loggingfcn(log, time, entity):
 
     """
     for name in entity._names:
-        log[name].append( copy(getattr(entity, name)) ) 
+        log[name].append( copy(getattr(entity, name)) )
 
 def _bfs_traversal(node):
     """
@@ -69,7 +69,7 @@ def _dfs_traversal(node, order=-1):
             yield node
         observed.add(node)
         stack.append([node, node.children])
-    
+
     while stack:
         node, children = stack.pop()
         while children:
@@ -77,7 +77,7 @@ def _dfs_traversal(node, order=-1):
                 yield node
             child = children.pop(0)
             if child not in observed:
-                observed.add(child) 
+                observed.add(child)
                 stack.append([node, children])
                 node, children = child, child.children
                 if order == -1:
@@ -85,7 +85,7 @@ def _dfs_traversal(node, order=-1):
         if order == 1:
             yield node
     return
-            
+
 def _dfs_recursive(node, order=-1):
     """
     Does recursive depth-first-search traversal of a binary tree.
@@ -165,12 +165,12 @@ class LoggerNode(object):
         return _dfs_traversal(self, order)
 
     def adjacencyList(self):
-        """ 
+        """
         Returns an adjacency list (sequence of all [parent, child] pairs) for a root
         tree node and all its descendants in a topological ordering of the nodes.
 
         """
-        nodes = _dfs_traversal(node)
+        nodes = _dfs_traversal(self)
         return [ (node.parent, node) for node in nodes]
 
 
@@ -191,14 +191,14 @@ class Recorder(object):
 
     def record(self, time, world, agents):
         self.log['time'].append(time)
-        self.log['size'].append(world.size)
+        self.log['size'].append(world._size)
         self._recording_fcn(self.log, time, world, agents)
 
     def _record(self, time, world, agents):
         for name in self.agent_vars:
             self.log[name].append( [copy(getattr(agent, name)) for agent in agents] )
         for name in self.world_vars:
-            self.log[name].append( copy(getattr(world, name)) )        
+            self.log[name].append( copy(getattr(world, name)) )
 
 
 def make_logger(names, logging_fcn=default_loggingfcn):

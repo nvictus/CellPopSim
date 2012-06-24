@@ -25,6 +25,7 @@ class BaseSimulator(object):
         num_agents_max   (int)
         world            (cps.entity.World)
         agents           (list-of-cps.entity.Agent)
+        agent_queue      (cps.misc.AgentQueue)
         loggers          (list-of-cps.state.LoggerNode)
         recorders        (list-of-cps.state.Recorder)
 
@@ -89,9 +90,9 @@ class FMSimulator(BaseSimulator):
         self.ndeaths = 0
 
         # initialize state variables with user-defined function
-        self.world.critical_size = 1
+        self.world._critical_size = 1
         self.state_initializer(self.world, self.agents)
-        self.world.size = self.world.critical_size*(self.num_agents/self.num_agents_max)
+        self.world._size = self.world._critical_size*(self.num_agents/self.num_agents_max)
 
         # schedule simulation channels
         self.world._scheduleAllChannels()
@@ -143,12 +144,13 @@ class FMSimulator(BaseSimulator):
                 # fire next agent channel
                 emin._processNextChannel() #processes queue
                 if emin in timetable:
-                    timetable.updateitem(emin, emin._next_event_time)
-                if emin._is_modified:
-                    world._rescheduleFromAgent(emin)
-                    #timetable.updateitem(world, world.next_event_time)
-                if not emin._enabled:
-                    del timetable[emin]
+                    if not emin._enabled:
+                        del timetable[emin]
+                    else:
+                        timetable.updateitem(emin, emin._next_event_time)
+                        if emin._is_modified:
+                            world._rescheduleFromAgent(emin)
+                            #timetable.updateitem(world, world.next_event_time)
 
             emin, tmin = self._earliestItem()
 
@@ -185,7 +187,7 @@ class FMSimulator(BaseSimulator):
             timetable.add(new_agent, new_agent._next_event_time)
             self.num_agents += 1
             self.nbirths += 1
-            world.size += world.critical_size/self.num_agents_max
+            world._size += world._critical_size/self.num_agents_max
             # Switch modes if we reach the size threshold
             if self.num_agents == self.num_agents_max:
                 self._mode = CONSTANT_NUMBER
@@ -199,7 +201,7 @@ class FMSimulator(BaseSimulator):
             timetable.pop(target)
             self.num_agents -= 1
             self.ndeaths += 1
-            world.size -= world.critical_size/self.num_agents_max
+            world._size -= world._critical_size/self.num_agents_max
             # Raise error if sample population crashes
             if self.num_agents == 0:
                 raise ZeroPopulationError("The population crashed!")
@@ -217,10 +219,13 @@ class FMSimulator(BaseSimulator):
             target = agents[index]
             # Substitute new agent into agent list and ipq
             agents[index] = new_agent
-            timetable.replaceitem(target, new_agent, new_agent._next_event_time)
+            try:
+                timetable.replaceitem(target, new_agent, new_agent._next_event_time)
+            except KeyError:
+                timetable.add(new_agent, new_agent._next_event_time) #target may be inactivated and no longer in the ipq
             del target
             self.nbirths += 1
-            world.size += (world.size/self.num_agents_max)*(world.critical_size/self.num_agents_max)
+            world._size += (world._size/self.num_agents_max)*(world._critical_size/self.num_agents_max)
         elif action == q.DELETE_AGENT:
             # This shouldn't happen...
             if self.num_agents <= 1:
@@ -238,10 +243,11 @@ class FMSimulator(BaseSimulator):
             new_agent = agents[i_source].__copy__()
             # Replace target agent with the copy
             agents[i_target] = new_agent
-            timetable.replaceitem(target, new_agent, new_agent._next_event_time)
+            if new_agent.enabled:
+                timetable.replaceitem(target, new_agent, new_agent._next_event_time)
             del target
             self.ndeaths += 1
-            world.size -= (world.size/self.num_agents_max)*(world.critical_size/self.num_agents_max)
+            world._size -= (world._size/self.num_agents_max)*(world._critical_size/self.num_agents_max)
             # Switch to normal mode if the size drops below the threshold
             if self.num_agents < self.num_agents_max: #THIS IS WRONG...
                 self._mode = NORMAL
@@ -261,9 +267,9 @@ class AMSimulator(BaseSimulator):
         self.ndeaths = 0
         self._replaced = set()
         # Apply user-defined initialization function.
-        self.world.critical_size = 1
+        self.world._critical_size = 1
         self.state_initializer(self.world, self.agents)
-        self.world.size = self.world.critical_size*(self.num_agents/self.num_agents_max)
+        self.world._size = self.world._critical_size*(self.num_agents/self.num_agents_max)
         # Schedule all simulation channels.
         self.world._scheduleAllChannels()
         for agent in self.agents:
@@ -330,7 +336,7 @@ class AMSimulator(BaseSimulator):
             agents.append(agent)
             self.num_agents += 1
             self.nbirths += 1
-            world.size += world.critical_size/self.num_agents_max
+            world._size += world._critical_size/self.num_agents_max
             # Switch modes if we reach the size threshold
             if self.num_agents == self.num_agents_max:
                 self._mode = CONSTANT_NUMBER
@@ -343,7 +349,7 @@ class AMSimulator(BaseSimulator):
                 raise SimulationError("Agent not found.")
             self.num_agents -= 1
             self.ndeaths += 1
-            world.size -= world.critical_size/self.num_agents_max
+            world._size -= world._critical_size/self.num_agents_max
             # Raise error if sample population crashes
             if self.num_agents == 0:
                 raise ZeroPopulationError("The sample population crashed!")
@@ -362,7 +368,7 @@ class AMSimulator(BaseSimulator):
                 # Substitute new agent into the list
                 agents[index] = agent
                 self.nbirths += 1
-                world.size += world.size/world.critical_size
+                world._size += world._size/world._critical_size
             else:
                 # This agent's parent has been replaced by another agent at an
                 # earlier time. Discard this agent!
@@ -387,7 +393,7 @@ class AMSimulator(BaseSimulator):
                 agents[i_target] = new_agent
                 del target
                 self.ndeaths += 1
-                world.size -= world.size/world.critical_size
+                world._size -= world._size/world._critical_size
                 # Switch modes if we drop below the size threshold
                 if self.num_agents < self.num_agents_max:
                     self._mode = NORMAL
