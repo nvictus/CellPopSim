@@ -24,6 +24,7 @@ from cps.logging import Recorder
 from cps.save import savemat_snapshot, savemat_lineage, savehdf_snapshot, savehdf_lineage
 from cps.simulator import FMSimulator, AMSimulator
 from cps.model import Model
+from cps.exception import SimulationError, SchedulingError, ZeroPopulationError
 
 from cps.misc import AgentQueue
 ADD_AGENT = AgentQueue.ADD_AGENT
