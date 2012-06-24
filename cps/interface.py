@@ -22,12 +22,10 @@ class IChannel(object):
     def fireEvent(self, entity, cargo, time, event_time, **kwargs):
         raise NotImplementedError
 
-class ILogger(object):
-    def record(self, time, entity):
+    def cloneAgent(self, agent):
         raise NotImplementedError
 
-class IRecorder(object):
-    def record(self, time, world, agents):
+    def killAgent(self, agent):
         raise NotImplementedError
 
 class IModel(object):
@@ -128,3 +126,10 @@ class IExecAgent(object):
     
     #def _prepareNewAgent(self, world):
 
+class ILogger(object):
+    def record(self, time, entity):
+        raise NotImplementedError
+
+class IRecorder(object):
+    def record(self, time, world, agents):
+        raise NotImplementedError

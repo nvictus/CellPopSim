@@ -24,7 +24,7 @@ class Model(object):
         nmax (int): the maximum number of agents allowed
 
     A functional model also needs:
-    1. An initializer: 
+    1. An initializer:
         addInitializer() to add a state initializer
 
     2. Simulation Channels:
@@ -82,7 +82,7 @@ class Model(object):
         Arguments:
             channel (cps.channel.WorldChannel)
         Optional:
-            name (default=class's name): a unique key to identify a channel from the other world channels 
+            name (default=class's name): a unique key to identify a channel from the other world channels
             wc_dependents (default=[]): a list of world channel instances that depend on this world channel
             ac_dependents (default=[]): a list of agent channel instances that depend on this world channel
 
@@ -106,7 +106,7 @@ class Model(object):
         Arguments:
             channel (cps.channel.AgentChannel)
         Optional:
-            name (default=class's name): a unique key to identify a channel from the other agent channels 
+            name (default=class's name): a unique key to identify a channel from the other agent channels
             wc_dependents (default=[]): a list of world channel instances that depend on this agent channel
             ac_dependents (default=[]): a list of agent channel instances that depend on this agent channel
 
@@ -115,7 +115,7 @@ class Model(object):
             name = channel._id
         else:
             channel._id = name
-            
+
         if name in self.agent_channel_table:
             raise ValueError("A channel with the same name has already been included in the model.")
         elif not isinstance(channel, AgentChannel):
@@ -125,11 +125,11 @@ class Model(object):
     def addLogger(self, agent_index, logged_varnames, logging_fcn=None):
         """
         Monitor the event history of an agent and its offspring by attaching a logger to it.
-        The logging function is called after each channel firing to record custom information about 
+        The logging function is called after each channel firing to record custom information about
         the agent's state.
 
         Arguments:
-            agent_index (int): index between 0 and n0 specifying which initial agent to track
+            agent_index (int): index between 0 and n0-1 specifying which initial agent to track
             logged_varnames (list-of-string): names of quantities being logged
             logging_fcn (callable): a user-defined function with signature f(log, event_time, agent)
 

@@ -2,7 +2,7 @@
 Name:        save
 
 Author:      Nezar Abdennur <nabdennur@gmail.com>
-Created:     
+Created:
 Copyright:   (c) Nezar Abdennur 2012
 
 """
@@ -10,10 +10,6 @@ Copyright:   (c) Nezar Abdennur 2012
 #-------------------------------------------------------------------------------
 # These functions convert recorded data into numpy arrays and save them to disk
 # in hdf5 format.
-import numpy as np
-import scipy.io
-import h5py
-
 
 def _accumulate(root):
     """
@@ -53,9 +49,19 @@ def _accumulate(root):
     sim_data.update(state_data)
     return sim_data, names
 
+
+import scipy.io
+
 def savemat_lineage(filename, root_node):
     sim_data, _ = _accumulate(root_node)
     scipy.io.savemat(filename, sim_data, oned_as='column')
+
+def savemat_snapshot(filename, recorder):
+    scipy.io.savemat(filename, recorder.log, oned_as='column')
+
+
+import numpy as np
+import h5py
 
 def savehdf_lineage(filename, root_node):
     sim_data, names = _accumulate(root_node)
@@ -75,9 +81,6 @@ def savehdf_lineage(filename, root_node):
         for name in names:
             dfile.create_dataset(name=name,
                                  data=np.array(sim_data[name]))
-
-def savemat_snapshot(filename, recorder):
-    scipy.io.savemat(filename, recorder.log, oned_as='column')
 
 def savehdf_snapshot(filename, recorder):
     with h5py.File(filename, 'w') as dfile:
