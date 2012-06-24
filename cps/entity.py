@@ -23,7 +23,7 @@ import math
 class ChannelSchedule(dict):
     """
     A simple prioritized collection that uses linear scan to find the smallest
-    item (channel with earliest event time). The min item is cached until the 
+    item (channel with earliest event time). The min item is cached until the
     queue is updated to improve lookup efficiency.
 
     """
@@ -61,9 +61,9 @@ class ChannelSchedule(dict):
 class Scheduler(object):
     """
     Provides access to the updatable channel event schedule for an entity and a
-    simulation clock. Also exposes the simulation channels and their dependency 
+    simulation clock. Also exposes the simulation channels and their dependency
     structure for managing channel firing and rescheduling. Can be copied.
-    Copying produces copies of the channels but preserve the same dependency 
+    Copying produces copies of the channels but preserve the same dependency
     structure.
 
     Attributes:
@@ -213,8 +213,8 @@ class Scheduler(object):
 class BaseEntity(object):
     """
     Base class for agent/world simulation entities.
-    When passed to simulation channel methods, entities provide a set of 
-    user-defined state variables. Attributes and methods with leading 
+    When passed to simulation channel methods, entities provide a set of
+    user-defined state variables. Attributes and methods with leading
     underscores make up the internal API for the simulator.
 
     Attributes:
@@ -347,8 +347,8 @@ class BaseEntity(object):
 
     def _enqueue_new_agents(self, channel):
         # When a channel fires, some agent(s) may be cloned. The additional agents are
-        # stored temporarily in the channel. Here we remove them from the channel and 
-        # push them into the global agent priority queue from which they may be processed. 
+        # stored temporarily in the channel. Here we remove them from the channel and
+        # push them into the global agent priority queue from which they may be processed.
         scheduler = self._scheduler
         while channel._new_agents:
             d = channel._new_agents.pop(0)
@@ -359,18 +359,19 @@ class BaseEntity(object):
     def _prepare_new_agent(self, new_agent):
         # New agents (clones) are "prepared" before being queued up for processing, based
         # on whether they were created in an agent channel or a world channel. If they were
-        # created in an agent channel, then the dependents of that channel should be 
+        # created in an agent channel, then the dependents of that channel should be
         # rescheduled.
         scheduler = new_agent._scheduler
+        time = scheduler.clock = self._scheduler.clock #advance clock
         if isinstance(self, Agent):
             channel = new_agent._curr_channel
             world = new_agent._simulator.world
-            scheduler[channel] = channel.scheduleEvent(new_agent, world, scheduler.clock, None)
+            scheduler[channel] = channel.scheduleEvent(new_agent, world, time, None)
             if self._is_modified:
                 for dependent in scheduler.dep_graph[channel]:
-                    scheduler[dependent] = dependent.scheduleEvent(new_agent, world, scheduler.clock, None)
+                    scheduler[dependent] = dependent.scheduleEvent(new_agent, world, time, None)
         if isinstance(self, LoggedAgent):
-            new_agent._logger.record(scheduler.clock, new_agent._curr_channel._id, new_agent)
+            new_agent._logger.record(time, new_agent._curr_channel._id, new_agent)
 
 class World(BaseEntity):
     """
@@ -381,8 +382,8 @@ class World(BaseEntity):
 
     """
     def _rescheduleFromAgent(self, source_agent=None):
-        """ 
-        Reschedule the world channels that depend on the last channel fired by an agent. 
+        """
+        Reschedule the world channels that depend on the last channel fired by an agent.
 
         """
         scheduler = self._scheduler
@@ -393,7 +394,7 @@ class World(BaseEntity):
 class Agent(BaseEntity):
     """
     Agent entity. Agents can be copied so as to introduce new offspring into
-    the population or queued up for removal from the population. They can also 
+    the population or queued up for removal from the population. They can also
     synchronize their schedulers to the world clock before a world event.
 
     Additional attributes:
@@ -412,8 +413,8 @@ class Agent(BaseEntity):
         return self._scheduler.l2g_graph[self._curr_channel] if self._is_modified else ()
 
     def _rescheduleFromWorld(self, world):
-        """ 
-        Reschedule the agent channels that depend on the last world channel that fired. 
+        """
+        Reschedule the agent channels that depend on the last world channel that fired.
 
         """
         scheduler = self._scheduler
@@ -478,11 +479,11 @@ class Agent(BaseEntity):
     def _kill(self, event_time, remove=True):
         """
         Flag this agent to signal that its scheduler should no longer be used.
-        If the remove option is True, the agent is pushed into the global agent 
+        If the remove option is True, the agent is pushed into the global agent
         queue for final processing and removal from the population.
 
         """
-        self._scheduler.enabled = False
+        self._enabled = False
         if remove:
             q = self._simulator.agent_queue
             q.enqueue(q.DELETE_AGENT, self, event_time)
