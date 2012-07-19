@@ -23,7 +23,7 @@ class Model(object):
         n0   (int): the initial number of agents to create
         nmax (int): the maximum number of agents allowed
 
-    A functional model also needs:
+    A model also needs:
     1. An initializer:
         addInitializer() to add a state initializer
 

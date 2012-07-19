@@ -361,9 +361,9 @@ class BaseEntity(object):
         # on whether they were created in an agent channel or a world channel. If they were
         # created in an agent channel, then the dependents of that channel should be
         # rescheduled.
-        scheduler = new_agent._scheduler
-        time = scheduler.clock = self._scheduler.clock #advance clock
+        time = new_agent._scheduler.clock = self._scheduler.clock #advance clock
         if isinstance(self, Agent):
+            scheduler = new_agent._scheduler
             channel = new_agent._curr_channel
             world = new_agent._simulator.world
             scheduler[channel] = channel.scheduleEvent(new_agent, world, time, None)
