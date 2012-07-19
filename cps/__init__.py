@@ -19,18 +19,32 @@ www.sysbiolab.uottawa.ca
 """
 #!/usr/bin/env python
 
-from cps.channel import AgentChannel, WorldChannel, RecordingChannel
+# Required
+from cps.channel import AgentChannel, WorldChannel
 from cps.logging import Recorder
-from cps.save import savemat_snapshot, savemat_lineage, savehdf_snapshot, savehdf_lineage
-from cps.simulator import FMSimulator, AMSimulator
 from cps.model import Model
+from cps.simulator import FMSimulator, AMSimulator
+
+# Channels
+from cps.channel import RecordingChannel
+
+# Exception handling
 from cps.exception import SimulationError, SchedulingError, ZeroPopulationError
 
+# Functions for saving recorder and logger data to file
+from cps.save import savemat_snapshot, savemat_lineage
+try:
+    from cps.save import savehdf_snapshot, savehdf_lineage
+except ImportError:
+    pass
+
+# Constants
 from cps.misc import AgentQueue
 ADD_AGENT = AgentQueue.ADD_AGENT
 DELETE_AGENT = AgentQueue.DELETE_AGENT
 del AgentQueue
 
+# Release info
 __author__   = '%s <%s>\n' % ('Nezar Abdennur', 'nabdennur@gmail.com')
 __license__  = 'ISC'
 __date__ = None

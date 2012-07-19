@@ -60,8 +60,9 @@ def savemat_snapshot(filename, recorder):
     scipy.io.savemat(filename, recorder.log, oned_as='column')
 
 
-import numpy as np
+
 import h5py
+import numpy as np
 
 def savehdf_lineage(filename, root_node):
     sim_data, names = _accumulate(root_node)
