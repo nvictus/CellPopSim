@@ -1,3 +1,6 @@
 # ignore contents of these folders
 __pycache__/
 data/
+
+# ignore these files
+cps-sim.psproj
