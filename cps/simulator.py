@@ -2,7 +2,6 @@
 Name:        simulator
 
 Author:      Nezar Abdennur <nabdennur@gmail.com>
-
 Created:     23/04/2012
 Copyright:   (c) Nezar Abdennur 2012
 
@@ -86,13 +85,15 @@ class FMSimulator(BaseSimulator):
         self._mode = NORMAL if self.num_agents < self.num_agents_max else CONSTANT_NUMBER
         self._processAgent = {NORMAL:self._processAgentNormalMode,
                               CONSTANT_NUMBER:self._processAgentConstantNumberMode}
+        self.sizethresh_hi = self.num_agents_max
+        self.sizethresh_lo = -1
+        self.world._ts = [self.world._time]
+        self.world._size = [self.num_agents]
         self.nbirths = 0
         self.ndeaths = 0
 
         # initialize state variables with user-defined function
-        self.world._critical_size = 1
         self.state_initializer(self.world, self.agents)
-        self.world._size = self.world._critical_size*(self.num_agents/self.num_agents_max)
 
         # schedule simulation channels
         self.world._scheduleAllChannels()
@@ -169,42 +170,45 @@ class FMSimulator(BaseSimulator):
 
     def _processAgentQueue(self):
         q = self.agent_queue
+        size = self.world._size[-1]
         while q:
             action, agent = q.dequeue()
-            self._processAgent[self._mode](action, agent)
-            #del agent
+            size += self._processAgent[self._mode](action, agent)
+            # Switch modes if we reach the size threshold
+            if self._mode == NORMAL and self.num_agents == self.sizethresh_hi:
+                self._mode = CONSTANT_NUMBER
+            # Switch modes if we drop to or below the size threshold
+            elif self._mode == CONSTANT_NUMBER and size <= self.sizethresh_lo:
+                size = self.self.sizethresh_lo
+                self._mode = NORMAL
+        self.world._ts.append( self.world._time )
+        self.world._size.append( size )
 
     def _processAgentNormalMode(self, action, agent):
         agents = self.agents
-        world = self.world
         timetable = self.timetable
         q = self.agent_queue
         if action == q.ADD_AGENT:
             new_agent = agent
             new_agent._parent = None
-            # Add the new agent
             agents.append(new_agent)
             timetable.add(new_agent, new_agent._next_event_time)
             self.num_agents += 1
             self.nbirths += 1
-            world._size += world._critical_size/self.num_agents_max
-            # Switch modes if we reach the size threshold
-            if self.num_agents == self.num_agents_max:
-                self._mode = CONSTANT_NUMBER
+            return 1
         elif action == q.DELETE_AGENT:
             target = agent
-            # Remove agent from population
             try:
                 agents.remove(target)
             except ValueError:
                 raise SimulationError("Agent not found.")
             timetable.pop(target)
             self.num_agents -= 1
-            self.ndeaths += 1
-            world._size -= world._critical_size/self.num_agents_max
             # Raise error if sample population crashes
             if self.num_agents == 0:
                 raise ZeroPopulationError("The population crashed!")
+            self.ndeaths += 1
+            return -1
 
     def _processAgentConstantNumberMode(self, action, agent):
         agents = self.agents
@@ -225,7 +229,7 @@ class FMSimulator(BaseSimulator):
                 timetable.add(new_agent, new_agent._next_event_time) #target may be inactivated and no longer in the ipq
             del target
             self.nbirths += 1
-            world._size += (world._size/self.num_agents_max)*(world._critical_size/self.num_agents_max)
+            return world._size[-1]/self.num_agents_max
         elif action == q.DELETE_AGENT:
             # This shouldn't happen...
             if self.num_agents <= 1:
@@ -240,17 +244,14 @@ class FMSimulator(BaseSimulator):
             i_source = i_target
             while i_source == i_target:
                 i_source = random.randint(0, self.num_agents-1)
-            new_agent = agents[i_source].__copy__()
             # Replace target agent with the copy
+            new_agent = agents[i_source].__copy__()
             agents[i_target] = new_agent
-            if new_agent.enabled:
-                timetable.replaceitem(target, new_agent, new_agent._next_event_time)
+            if new_agent._enabled:
+                timetable.replaceitem(target, new_agent, new_agent._next_event_time) #will fail if cell is killed twice!
             del target
             self.ndeaths += 1
-            world._size -= (world._size/self.num_agents_max)*(world._critical_size/self.num_agents_max)
-            # Switch to normal mode if the size drops below the threshold
-            if self.num_agents < self.num_agents_max: #THIS IS WRONG...
-                self._mode = NORMAL
+            return -(world._size[-1]/self.num_agents_max)
 
 
 
@@ -263,13 +264,17 @@ class AMSimulator(BaseSimulator):
 
     def initialize(self):
         self._mode = NORMAL if self.num_agents < self.num_agents_max else CONSTANT_NUMBER
+        self.sizethresh_hi = self.num_agents_max
+        self.sizethresh_lo = -1
+        self.world._ts = [self.world._time]
+        self.world._size = [self.num_agents]
         self.nbirths = 0
         self.ndeaths = 0
         self._replaced = set()
+
         # Apply user-defined initialization function.
-        self.world._critical_size = 1
         self.state_initializer(self.world, self.agents)
-        self.world._size = self.world._critical_size*(self.num_agents/self.num_agents_max)
+
         # Schedule all simulation channels.
         self.world._scheduleAllChannels()
         for agent in self.agents:
@@ -316,43 +321,48 @@ class AMSimulator(BaseSimulator):
     def _processAgentQueue(self):
         q = self.agent_queue
         replaced = self._replaced
+        # Process agents one by one
+        size = self.world._size[-1]
         while q:
             action, agent = q.dequeue()
             if self._mode == NORMAL:
-                self._processAgentNormalMode(action, agent)
+                size += self._processAgentNormalMode(action, agent)
+                # Switch modes if we reach the size threshold
+                if self.num_agents == self.sizethresh_hi:
+                    self._mode = CONSTANT_NUMBER
             else:
-                self._processAgentConstantNumberMode(action, agent, replaced)
-            del agent
+                size += self._processAgentConstantNumberMode(action, agent, replaced)
+                # Switch modes if we fall to or drop below the size threshold
+                if size <= self.sizethresh_lo:
+                    size = self.sizethresh_lo
+                    self._mode = NORMAL
+        # Update population counter
+        self.world._ts.append( self.world._time )
+        self.world._size.append( size )
+        # Clear memo of replaced agents
         if replaced:
             replaced.clear()
 
     def _processAgentNormalMode(self, action, agent):
         agents = self.agents
-        world = self.world
         q = self.agent_queue
         if action == q.ADD_AGENT:
             agent._parent = None
-            # Add agent
             agents.append(agent)
             self.num_agents += 1
             self.nbirths += 1
-            world._size += world._critical_size/self.num_agents_max
-            # Switch modes if we reach the size threshold
-            if self.num_agents == self.num_agents_max:
-                self._mode = CONSTANT_NUMBER
+            return 1
         elif action == q.DELETE_AGENT:
-            # Remove agent from population
             target = agent
             try:
                 agents.remove(target)
             except ValueError:
                 raise SimulationError("Agent not found.")
             self.num_agents -= 1
-            self.ndeaths += 1
-            world._size -= world._critical_size/self.num_agents_max
-            # Raise error if sample population crashes
             if self.num_agents == 0:
                 raise ZeroPopulationError("The sample population crashed!")
+            self.ndeaths += 1
+            return -1
 
     def _processAgentConstantNumberMode(self, action, agent, replaced):
         agents = self.agents
@@ -368,11 +378,11 @@ class AMSimulator(BaseSimulator):
                 # Substitute new agent into the list
                 agents[index] = agent
                 self.nbirths += 1
-                world._size += world._size/world._critical_size
+                return world._size[-1]/self.num_agents_max
             else:
-                # This agent's parent has been replaced by another agent at an
-                # earlier time. Discard this agent!
-                del agent
+                # This agent's parent has been replaced by another agent at an earlier time.
+                # Discard this agent!
+                return 0
         elif action == q.DELETE_AGENT:
             target = agent; del agent
             if target not in replaced:
@@ -388,17 +398,15 @@ class AMSimulator(BaseSimulator):
                 i_source = i_target
                 while i_source == i_target:
                     i_source = random.randint(0, self.num_agents-1)
-                new_agent = agents[i_source].__copy__()
                 # Replace target agent
-                agents[i_target] = new_agent
+                agents[i_target] = agents[i_source].__copy__()
                 del target
                 self.ndeaths += 1
-                world._size -= world._size/world._critical_size
-                # Switch modes if we drop below the size threshold
-                if self.num_agents < self.num_agents_max:
-                    self._mode = NORMAL
+                return -(world._size[-1]/self.num_agents_max)
             else:
-                # This agent has already been replaced. Discard.
-                del target
+            # This agent's parent has been replaced by another agent at an earlier time.
+            # Discard this agent!
+                return 0
+
 
 

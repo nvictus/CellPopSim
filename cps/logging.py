@@ -182,7 +182,7 @@ class Recorder(object):
     def __init__(self, world_names, agent_names, recording_fcn=None):
         self.world_names = world_names
         self.agent_names = agent_names
-        names = ['time' , 'size'] + world_names + agent_names
+        names = ['time'] + world_names + agent_names # + ['size']
         self.log = dict([(name, []) for name in names])
         if recording_fcn is not None:
             self._recording_fcn = recording_fcn
@@ -191,14 +191,14 @@ class Recorder(object):
 
     def record(self, time, world, agents):
         self.log['time'].append(time)
-        self.log['size'].append(world._size)
+        #self.log['size'].append(world._size)
         self._recording_fcn(self.log, time, world, agents)
 
-    def _record(self, time, world, agents):
-        for name in self.agent_vars:
-            self.log[name].append( [copy(getattr(agent, name)) for agent in agents] )
-        for name in self.world_vars:
-            self.log[name].append( copy(getattr(world, name)) )
+    def _record(self, log, time, world, agents):
+        for name in self.agent_names:
+            log[name].append( [copy(getattr(agent, name)) for agent in agents] )
+        for name in self.world_names:
+            log[name].append( copy(getattr(world, name)) )
 
 
 def make_logger(names, logging_fcn=default_loggingfcn):
