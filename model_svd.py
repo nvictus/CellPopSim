@@ -1,26 +1,12 @@
 #-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     31/01/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
+# STOCHASTICS-VOLUME-DIVISON MODEL
+#---------------------------------
 #!/usr/bin/env python
 
 from cps import *
-from copy import copy
-import random
-import math
-import time
+import math, random, time
 
 DEBUG = 0
-
-#-------------------------------------------------------------------------------
-# STOCHASTICS-VOLUME-DIVISON MODEL
-#---------------------------------
 
 class GillespieChannel(AgentChannel):
     """ Performs Gillespie SSA """
@@ -42,7 +28,7 @@ class GillespieChannel(AgentChannel):
         return time + self.tau
 
     def fireEvent(self, cell, gdata, time, event_time):
-        self.fire(cell, 'VolumeChannel')
+        self.fire(cell, 'VolumeChannel') #update cell volume to the event time
         for i in range(0, len(cell.x)):
             cell.x[i] += self.stoich_list[self.mu][i]
         return True
@@ -68,12 +54,12 @@ class DivisionChannel(AgentChannel):
         return time + math.log(cell.v_thresh/cell.v)/gdata.kV
 
     def fireEvent(self, cell, gdata, time, event_time):
-        self.fire(cell,'VolumeChannel')
+        self.fire(cell,'VolumeChannel') #update cell volume to the event time
         new_cell = self.cloneAgent(cell)
         v_mother = cell.v
         cell.v, new_cell.v = self.prob*v_mother, (1-self.prob)*v_mother
-        cell.v_thresh = 2 + random.normalvariate(0, 0.15)
-        new_cell.v_thresh = 2 + random.normalvariate(0, 0.15)
+        cell.v_thresh = 2 + random.normalvariate(0, 0.05)
+        new_cell.v_thresh = 2 + random.normalvariate(0, 0.05)
         x_mother = cell.x[:]
         cell.x[0], new_cell.x[0] = self._binomialPartition(x_mother[0])
         cell.x[1], new_cell.x[1] = self._binomialPartition(x_mother[1])
@@ -129,16 +115,17 @@ s = (( 1, 0 ),
 rc = RecordingChannel(tstep=50, recorder=recorder)
 gc = GillespieChannel(propensity_fcn=prop_fcn, stoich_list=s)
 vc = VolumeChannel(tstep=5)
-dc = DivisionChannel(prob=0.5)
+dc = DivisionChannel(prob=0.2)
 model.addWorldChannel(channel=rc)
 model.addAgentChannel(channel=gc)
 model.addAgentChannel(channel=vc, sync=True)
 model.addAgentChannel(channel=dc, ac_dependents=[gc,vc])
 
 
+
 if __name__=='__main__':
-    sim = FMSimulator(model, 0)
-    #sim = AMSimulator(model, 0)
+    #sim = FMSimulator(model, 0)
+    sim = AMSimulator(model, 0)
 
     t0 = time.time()
     sim.runSimulation(10000)
@@ -147,8 +134,8 @@ if __name__=='__main__':
     recorder = sim.recorders[0]
     logger = sim.loggers[0]
 
-    savemat_snapshot('data/svd2_data.mat', recorder)
-    #savemat_lineage('data/svd_lineage.hdf5', logger)
+    savemat_snapshot('data/svd_data_tmp.mat', recorder)
+    #savemat_lineage('data/svd_lineage_02.mat', logger)
 
 
 

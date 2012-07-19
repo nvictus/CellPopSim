@@ -1,13 +1,6 @@
 #-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     08/05/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
+# POISSONIAN EVENT MODEL
+#-----------------------
 #!/usr/bin/env python
 
 from cps import *

@@ -1,22 +1,10 @@
 #-------------------------------------------------------------------------------
-# Name:        module1
-# Purpose:
-#
-# Author:      Nezar
-#
-# Created:     19/03/2012
-# Copyright:   (c) Nezar 2012
-# Licence:     <your licence>
-#-------------------------------------------------------------------------------
+# STRESS MODEL
+#-------------
 #!/usr/bin/env python
 
 from cps import *
 import math, random, time
-#import pickle
-
-#-------------------------------------------------------------------------------
-# STRESS MODEL
-#-------------
 
 class StressChannel(WorldChannel):
     """
@@ -49,8 +37,6 @@ class OUProteinChannel(AgentChannel):
         self.c = c
         self.tstep = tstep
         self.e0 = math.exp(0.25*self.c*self.tau)
-        self.fmax = 0.5*math.log(2) #min doubling time = 1
-        self.fmin = -0.75*math.log(2)
 
     def scheduleEvent(self, cell, gdata, time, src):
         return time + self.tstep
@@ -66,9 +52,9 @@ class OUProteinChannel(AgentChannel):
         # compute reproductive rate and update reproductive capacity
         if gdata.stress:
             w = (cell.y/gdata.Kw)**gdata.nw
-            cell.fitness = (self.fmax+self.fmin*w)/(1 + w)
+            cell.fitness = (gdata.fmax+gdata.fmin*w)/(1 + w)
         else:
-            cell.fitness = self.fmax
+            cell.fitness = gdata.fmax
         cell.capacity *= math.exp(cell.fitness*self.tstep)
         return True
 
@@ -106,14 +92,15 @@ class DivDeathChannel(AgentChannel):
 
 
 # Create model...
-model = Model(n0=1, nmax=100)
+ncrit = 100
+model = Model(n0=ncrit, nmax=ncrit)
 
 def my_logger(log, time, agent):
     log['alive'].append(agent.alive)
     log['x'].append(agent.x)
     log['y'].append(agent.y)
     log['capacity'].append(agent.capacity)
-model.addLogger(0, ['alive','x','y','capacity'], my_logger)
+#model.addLogger(0, ['alive','x','y','capacity'], my_logger)
 
 def my_recorder(log, time, world, agents):
     log['stress'].append(world.stress)
@@ -126,10 +113,11 @@ model.addRecorder(recorder)
 
 def initialize(gdata, cells):
     # initialize simulation entities
-    gdata.critical_size = 1
     gdata.stress = False
     gdata.Kw = 0.5
     gdata.nw = 10
+    gdata.fmax = 0.1*math.log(2) #if log(2), fastest doubling time = 1
+    gdata.fmin = -0.2*math.log(2) # if -log(2), fastest death time from neutrality is 1
     for cell in cells:
         cell.alive = True
         cell.x = math.sqrt(0.5*10*0.1)*random.normalvariate(0,1)
@@ -139,7 +127,7 @@ model.addInitializer(['stress', 'Kw', 'nw'], ['alive', 'capacity', 'x', 'y'], in
 
 rc = RecordingChannel(tstep=0.5, recorder=recorder)
 sc = StressChannel(switch_times=[40])
-pc = OUProteinChannel(tstep=0.1, tau=10, c=0.1)
+pc = OUProteinChannel(tstep=0.1, tau=10, c=1/10)
 dc = DivDeathChannel()
 model.addWorldChannel(channel=rc)
 model.addWorldChannel(channel=sc, ac_dependents=[pc,dc])
@@ -147,22 +135,27 @@ model.addAgentChannel(channel=pc, ac_dependents=[dc], sync=False)
 model.addAgentChannel(channel=dc, ac_dependents=[pc])
 
 
+
 if __name__=='__main__':
-    sim = FMSimulator(model, 0)
-    #sim = AMSimulator(model, 0)
+    #sim = FMSimulator(model, 0)
+    sim = AMSimulator(model, 0)
 
     t0 = time.time()
-    sim.runSimulation(80)
+    sim.runSimulation(160)
     t = time.time()
     print(t-t0)
     print(sim.nbirths, sim.ndeaths)
 
-    savemat_snapshot('data/stress.mat', sim.recorders[0])
-    savemat_lineage('data/stress_lineage.mat', sim.loggers[0])
+    #savemat_snapshot('data/stress.mat', sim.recorders[0])
+    #savemat_lineage('data/stress_lineage.mat', sim.loggers[0])
     #savehdf_lineage('data/test2.hdf5', root)
 
+    #from matplotlib import pyplot as plt
+    #t = sim.world._ts
+    #s = sim.world._size
+    #plt.plot(t,[si/ncrit for si in s],'-*')
+    #plt.show()
 
-##    # pickle
-##    save_file = open('data/stress_model.p','wb')
-##    pickle.dump(recorder, save_file)
-##    save_file.close()
+    #import pickle
+    #pickle.dump(recorder, 'tmp1.p')
+    #pickle.dump(N, 'tmp2.p')
