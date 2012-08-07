@@ -396,7 +396,7 @@ class AMSimulator(BaseSimulator):
                     raise SimulationError("Agent not found.")
                 # Choose random agent to copy
                 i_source = i_target
-                while i_source == i_target:
+                while i_source == i_target or not agents[i_source]._enabled:
                     i_source = random.randint(0, self.num_agents-1)
                 # Replace target agent
                 agents[i_target] = agents[i_source].__copy__()

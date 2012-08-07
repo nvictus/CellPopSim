@@ -1,6 +1,8 @@
 # ignore contents of these folders
 __pycache__/
 data/
+test/
 
 # ignore these files
 cps-sim.psproj
+todo.txt
