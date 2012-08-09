@@ -104,6 +104,10 @@ class FMSimulator(BaseSimulator):
         event_times = [agent._next_event_time for agent in self.agents]
         self.timetable = IndexedPriorityQueue(zip(self.agents, event_times))
 
+        # TODO: make this better
+        for recorder in self.recorders:
+            recorder.record(self.world._time, self.world, self.agents)
+
     def runSimulation(self, tstop):
         world = self.world
         agents = self.agents
