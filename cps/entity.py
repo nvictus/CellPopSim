@@ -381,14 +381,14 @@ class World(BaseEntity):
         _size
 
     """
-    def _rescheduleFromAgent(self, source_agent=None):
+    def _rescheduleFromAgent(self, source_agent=None, wchannels=()):
         """
         Reschedule the world channels that depend on the last channel fired by an agent.
 
         """
         scheduler = self._scheduler
         agents = self._simulator.agents
-        for wchannel in source_agent._getDependentWCs():
+        for wchannel in wchannels:
             scheduler[wchannel] = wchannel.scheduleEvent(self, agents, scheduler.clock, source_agent)
 
 class Agent(BaseEntity):
@@ -457,7 +457,8 @@ class Agent(BaseEntity):
                         scheduler[dependent] = dependent.scheduleEvent(self, world, scheduler.clock, None)
                 # reschedule A2W if is modified
                 if isinstance(simulator, FMSimulator) and self._is_modified:
-                    world._rescheduleFromAgent(self)
+                    dependents = self._scheduler.l2g_graph[channel] if self._is_modified else ()
+                    world._rescheduleFromAgent(self, dependents)
 
     def __copy__(self):
         """
