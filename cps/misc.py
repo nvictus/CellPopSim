@@ -23,7 +23,7 @@ class IPQEntry(object):
         return self.pkey == other.pkey
 
     def __repr__(self):
-        return "PQDEntry(" + str(self.item) + ": " + str(self.pkey) + ")"
+        return "IPQEntry(" + str(self.item) + ": " + str(self.pkey) + ")"
 
 #TODO: We may need to consider the case of equal priority values if
 #      we wish to enforce an ordering on channels with equal event times.
@@ -372,10 +372,10 @@ class AgentQueue(object):
             if agent._parent:
                 heapq.heappush( self.heap, AgentQueue.Entry(priority_key, agent, action) )
             else:
-                raise SimulationError("The agent queued for insertion is already in the population.")
+                raise SimulationError("The agent queued for insertion is already in the collection.")
         elif action == AgentQueue.DELETE_AGENT:
             if agent._parent:
-                raise SimulationError("The agent queued for deletion is not in the population.")
+                raise SimulationError("The agent queued for deletion is not in the collection.")
             else:
                 #agent.stop()
                 heapq.heappush( self.heap, AgentQueue.Entry(priority_key, agent, action) )
