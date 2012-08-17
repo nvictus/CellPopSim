@@ -292,13 +292,15 @@ class AMSimulator(BaseSimulator):
         tsync = world._next_event_time
 
         while (tsync <= tstop):
-            for agent in agents:
-                while agent._enabled and agent._time <= tsync:
-                    agent._processNextChannel() #does not process queue
-                if self._do_sync:
-                    agent._synchronize(tsync)   #does not process queue
-            # process queue late
-            self._processAgentQueue()
+            not_done = agents
+            while not_done:
+                for agent in not_done:
+                    while agent._enabled and agent._time <= tsync:
+                        agent._processNextChannel() #does not process queue
+                    if self._do_sync:
+                        agent._synchronize(tsync)   #does not process queue
+                # process queue late
+                not_done = self._processAgentQueue()
 
             # TODO: cross-schedule A2W from a collected batch of dependents
             # NOTE: agent-to-world scheduling could be a BAD idea
@@ -324,18 +326,19 @@ class AMSimulator(BaseSimulator):
 
     def _processAgentQueue(self):
         q = self.agent_queue
+        not_done = set()
         replaced = self._replaced
         # Process agents one by one
         size = self.world._size[-1]
         while q:
             action, agent = q.dequeue()
             if self._mode == NORMAL:
-                size += self._processAgentNormalMode(action, agent)
+                size += self._processAgentNormalMode(action, agent, not_done)
                 # Switch modes if we reach the size threshold
                 if self.num_agents == self.sizethresh_hi:
                     self._mode = CONSTANT_NUMBER
             else:
-                size += self._processAgentConstantNumberMode(action, agent, replaced)
+                size += self._processAgentConstantNumberMode(action, agent, not_done, replaced)
                 # Switch modes if we fall to or drop below the size threshold
                 if size <= self.sizethresh_lo:
                     size = self.sizethresh_lo
@@ -346,8 +349,10 @@ class AMSimulator(BaseSimulator):
         # Clear memo of replaced agents
         if replaced:
             replaced.clear()
+        # Return successfully added agents
+        return not_done
 
-    def _processAgentNormalMode(self, action, agent):
+    def _processAgentNormalMode(self, action, agent, not_done):
         agents = self.agents
         q = self.agent_queue
         if action == q.ADD_AGENT:
@@ -355,6 +360,7 @@ class AMSimulator(BaseSimulator):
             agents.append(agent)
             self.num_agents += 1
             self.nbirths += 1
+            not_done.add(agent)
             return 1
         elif action == q.DELETE_AGENT:
             target = agent
@@ -368,7 +374,7 @@ class AMSimulator(BaseSimulator):
             self.ndeaths += 1
             return -1
 
-    def _processAgentConstantNumberMode(self, action, agent, replaced):
+    def _processAgentConstantNumberMode(self, action, agent, not_done, replaced):
         agents = self.agents
         world = self.world
         q = self.agent_queue
@@ -382,6 +388,7 @@ class AMSimulator(BaseSimulator):
                 # Substitute new agent into the list
                 agents[index] = agent
                 self.nbirths += 1
+                not_done.add(agent)
                 return world._size[-1]/self.num_agents_max
             else:
                 # This agent's parent has been replaced by another agent at an earlier time.
