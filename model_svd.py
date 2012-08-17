@@ -75,14 +75,14 @@ class DivisionChannel(AgentChannel):
 
 # Create the model...
 
-model = Model(n0=100, nmax=100)
+model = Model(n0=10000, nmax=10000)
 
 def my_init(gdata, cells):
-    gdata.kR = 0.01
-    gdata.kP = 1
+    gdata.kR = 0.8 #0.01
+    gdata.kP = 0.05 #1
     gdata.gR = 0.1
     gdata.gP = 0.002
-    gdata.kV = 0.0002
+    gdata.kV = math.log(2)/1800
     for cell in cells:
         cell.x = [0, 0]
         cell.v = math.exp(random.uniform(0,math.log(2)))
@@ -112,10 +112,10 @@ s = (( 1, 0 ),
      ( 0, 1 ),
      (-1, 0 ),
      ( 0,-1 ))
-rc = RecordingChannel(tstep=50, recorder=recorder)
+rc = RecordingChannel(tstep=100, recorder=recorder)
 gc = GillespieChannel(propensity_fcn=prop_fcn, stoich_list=s)
 vc = VolumeChannel(tstep=5)
-dc = DivisionChannel(prob=0.2)
+dc = DivisionChannel(prob=0.5)
 model.addWorldChannel(channel=rc)
 model.addAgentChannel(channel=gc)
 model.addAgentChannel(channel=vc, sync=True)
@@ -128,13 +128,13 @@ if __name__=='__main__':
     sim = AMSimulator(model, 0)
 
     t0 = time.time()
-    sim.runSimulation(10000)
+    sim.runSimulation(8000)
     t = time.time()
     print(t-t0)
     recorder = sim.recorders[0]
     logger = sim.loggers[0]
 
-    savemat_snapshot('data/svd_data_tmp.mat', recorder)
+    savemat_snapshot('c:/nezar/temp/data/svd_data_0.5.mat', recorder)
     #savemat_lineage('data/svd_lineage_02.mat', logger)
 
 
