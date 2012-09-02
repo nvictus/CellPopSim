@@ -17,8 +17,8 @@ To create a model import the `cps` module. The `cps` module provides the followi
 
 The building blocks of a model are the simulation channel classes. World channel objects are assigned to the world entity while agent channel objects are assigned to agents. The cps module already provides a class called `RecordingChannel` for one type of world channel which fires at regular intervals to record snapshots of the entity collection. But the idea behind the framework is to create your own simulation channels. You do this by [subclassing](http://docs.python.org/py3k/tutorial/classes.html#inheritance) (inheriting from) the `AgentChannel` or `WorldChannel` classes and providing implementations of the methods `scheduleEvent()` and `fireEvent()`. 
 
-Create channels
----------------
+Create channel classes
+----------------------
 The schedule method must have the signature:
 
 ```python
@@ -49,11 +49,11 @@ def fireEvent(self, world, agents, time, event_time, ...):
    ...
 ```
 
-for a world channel. The `event_time` is the firing time of the event being fired. After the fire method returns, the parent entity's clock is advanced to that time. The fire method can also provide any number of custom [_keyword_ arguments](http://docs.python.org/py3k/tutorial/controlflow.html#keyword-arguments) after the fifth (e.g., using the python `**kwargs` construct), which can be used to pass extra information to the channel when it is fired [manually](#manual-firing).
+for a world channel. The `event_time` is the firing time of the event being fired. After the fire method returns, the parent entity's clock is advanced to that time. The fire method can also provide any number of custom [keyword arguments](http://docs.python.org/py3k/tutorial/controlflow.html#keyword-arguments) after the fifth one (e.g., using the python `**kwargs` construct), which can be used to pass extra information to the channel when it is fired [manually](#manual-firing).
 
 ### State-updating events
 
-A state-updating event is any simulation event that may cause a change in an entity's state. An toy example is a simple counting process that increments a counter at random intervals. The class would look like:
+A state-updating event is any simulation event that may cause a change in an entity's state. A toy example is a simple counting process that increments a counter at random intervals. The class would look like:
 
 ```python
 class PoissonProcessChannel(AgentChannel):
@@ -110,25 +110,25 @@ class PoissonProcessChannel(AgentChannel):
 
     def fireEvent(self, agent, world, time, event_time):
 		self.fire(agent, 'UpdateVolumeChannel')
-        cell.count += 1
+        agent.count += 1
         return True
 ```
-Of course, if `UpdateVolumeChannel` uses a sufficiently small time step, these manual firings would not be necessary. Another application of manual firing is to modify an agent from within a world channel or for an agent to modify the world entity. There is an extra `reschedule` option which is `False` by default. If the `reschedule` option is set to `True` when an agent (world) channel is manually fired, corresponding agent (world) channel rescheduling dependencies will be invoked. Also, additional keyword arguments can be passed to the channel being fired, provided the channel's `fireEvent()` method accepts those arguments in its function signature.
+The manually fired channel receives the same values of `time` and `event_time` as those of the channel that fired it. Of course, if `UpdateVolumeChannel` uses a sufficiently small time step, these manual firings would not be necessary. Another application of manual firing is to modify an agent from within a world channel or for an agent channel to modify the world entity. There is an extra `reschedule` option which is `False` by default when a channel is manually fired. If the `reschedule` option is set to `True`, then after the agent (world) channel fires, its dependent agent (world) channels will be rescheduled. Also, additional keyword arguments can be passed to a channel being fired manually, provided the channel's `fireEvent()` method accepts those arguments in its function signature.
 
 Create a model object
--------------------------------
+---------------------
 The ingredients of a model are:
 
-1. The initial and maximum number of agents to allow
-2. A set of world and agent channel instances and their dependencies
-3. An initializer to set the initial state of the agents and world
-4. Recorders and loggers
+1. The __initial number__ of agents to create and __maximum number__ to allow
+2. A set of __world channel__ and __agent channel__ objects and their __rescheduling dependencies__
+3. An __initializer__ to set the initial state of the agents and world
+4. __Recorders__ and __loggers__ to collect data
 
-We can create an empty model object by calling the Model class constructor as follows:
+We can create an empty model object by calling the `Model` class [constructor](http://docs.python.org/py3k/tutorial/classes.html#class-objects) as follows:
 ```python
 my_model = Model(n0=100, nmax=1000)
 ```
-where the `n0` and `max` arguments are the initial and maximum number of agents respectively.
+where the `n0` and `max` arguments are the initial and maximum number of agents in the collection, respectively.
 
 We then create instances of each of our defined channel classes. We need to provide at least one world channel object for the simulation to work. For example, the `RecordingChannel` constructor takes a recorder object and the value of the time step between recordings as input arguments:
 ```python
@@ -141,7 +141,7 @@ Then we add each channel object to the model using the methods `addWorldChannel(
 my_model.addAgentChannel(c3, ac_dependents=[c2,c4], wc_dependents=[c1])
 ```
 
-Every agent will obtain a unique copy of the agent channel objects you created. In the above example, each time an agent's channel _c3_ fires and is subsequently rescheduled, its channels _c2_ and _c4_ and the world channel _c1_ will be automatically rescheduled by the simulator. The rescheduling occurs in the order: _c3_, _c2_, _c4_, _c1_. A last optional argument when adding agent channels is the `sync_channel` option which is `False` by default. If changed to `True`, the agent channel is considered to be a _sync-channel_ which means that the simulator will fire it right before every world channel fires. This is normally useful for synchronization purposes, hence the name.
+Every agent will obtain a unique copy of the agent channel objects you created. In the above example, each time an agent's channel _c3_ fires and is subsequently rescheduled, its channels _c2_ and _c4_ and the world channel _c1_ will be automatically rescheduled by the simulator. The rescheduling occurs in the order: _c3_, _c2_, _c4_, _c1_. A last optional argument when adding agent channels is the `sync` option which is `False` by default. If changed to `True`, the agent channel _c3_ is considered to be a _sync-channel_ which means that the simulator will fire it right before every world channel fires. This is normally useful for synchronization purposes, hence the name.
 
 When adding a world channel as in the following example,
 ```python
@@ -164,20 +164,20 @@ def my_initializer(world, agents):
         cell.y = math.exp(cell.x)
 ```
 
-We add the initializer function to the model, first providing a list of the names of the world and then a list of agent state variable names and then the initializer function:
+We add the initializer function to the model, first providing a list of the names of the world state variables and then a list of agent state variable names and then the initializer function:
 ```python
 my_model.addInitializer(['stress', 'Kw', 'nw'], ['alive', 'x', 'y'], my_initializer)
 ```
 
 
 Recorders and Loggers
----------------------------------
+---------------------
 [Sorry... this and the dependency specification are probably the ugliest parts of the user experience of the framework. They need to be improved!]
 
 The framework currently provides two built-in ways of recording data during a simulation run. The first is an object called a __recorder__ which takes snapshots of all the entities by default. The second is an object called a __logger__, which is attached to a specific agent and records the state of that agent after each firing of its channels. The logger also branches when an agent is cloned and records the history of child agents as well. In other words, a logger stores a tree of nodes containing the event history of the agents in a genealogical lineage. Both recorders and loggers can be customized.
 
 ### Recorders
-To create a recorder, use the `Recorder` class and provide the names of the world variables to record and then the names of state variables to record. Optionally you can include a custom recording function as a third argument.
+To create a recorder, use the `Recorder` class and provide the names of the world state variables to record and then the names of agent state variables to record. Optionally you can include a custom recording function as a third argument.
 
 ```python
 recorder = Recorder(['stress'], ['alive','x','y','capacity'], my_recorder)
@@ -195,7 +195,7 @@ def my_recorder(log, time, world, agents):
     log['y'].append([agent.y for agent in agents])
 ```
 
-where `log` is a [dictionary](http://docs.python.org/py3k/tutorial/datastructures.html#dictionaries) where each name you provided in the Recorder constructor is mapped to a list. In this example, each world variable is appended to the list with the same name. For each agent variable, the values belonging to all the agents are grouped together using a [list comprehension](http://docs.python.org/py3k/tutorial/datastructures.html#list-comprehensions) over all the agents and appended to produce a list of lists. The default recording method does something similar to what is shown in the example above. The recording time is logged automatically.
+where `log` is a [dictionary](http://docs.python.org/py3k/tutorial/datastructures.html#dictionaries) where each name you provided in the `Recorder` constructor is mapped to a list. In this example, each world variable is appended to the list with the same name. For each agent variable, the values belonging to all the agents are grouped together using a [list comprehension](http://docs.python.org/py3k/tutorial/datastructures.html#list-comprehensions) over all the agents and appended to produce a list of lists. The default recording method does something similar to what is shown in the example above. The recording time is logged automatically.
 
 ### Loggers
 To attach a logger to a cell lineage, specify an index between `0` and `n0-1` referring to one of the agents at the beginning of the simulation. After that, specify a list of names for the log, optionally followed by a logger function.
@@ -216,7 +216,7 @@ def my_logger(log, time, agent):
 where again, `log` is a dictionary mapping names to lists. The time of each event and id of the channel that fired are also recorded to the log automatically. After a simulation, a logger provides methods to traverse the nodes of the agent lineage using breadth-first or depth-first search algorithms. See the docs in the `cps.logging` submodule for more information.
 
 Running a simulation
-------------------------------
+--------------------
 To run a simulation there are two possible algorithms you can use:
 
 1. The _First-Entity method_ (FM)
@@ -234,7 +234,7 @@ sim.runSimulation(500)
 References to each of the loggers and recorders you added are stored in lists called `loggers` and `recorders`, respectively, in the simulator object.
 
 Saving simulation data
---------------------------------
+----------------------
 I included two functions to save the recorder and logger data logs to MATLAB mat files, as well as similar functions to save to HDF5 format. Let's stick to the mat format and assume we're saving to some file with given path strings:
 
 ```python
@@ -245,3 +245,12 @@ savemat_snapshot(another_file_path, sim.recorders[0])
 The `savemat_lineage` function saves logger data. For each agent state variable, the data from each individual cell is concatenated a long array and a separate matrix called `adj` stores the indices that demark the range of data belonging to each cell, along with a adjacency list of node ids so that the tree can be reconstructed.
 
 The `savemat_snapshot` function is for recorder data. If the simulation has _N_ cells throughout and _T_ recording events, the snapshot data file will contain a _TxN_ matrix for each numerical state variable along with a _Tx1_ vector of time points. If the size of the collection changes during simulation, the state data will be saved in _Tx1_ cell arrays.
+
+Additional info
+---------------
+### Tracking the virtual population density
+[This feature is still "hidden" and needs to be refactored and tidied up]
+
+When running a simulation in __constant-number__ mode, it is useful to think of the collection as a coarse-grained representation of a virtual population in a fixed volume. Currently, we use two hidden world attributes --- lists called `_size` and `_ts` --- to monitor this virtual population size over time. When the agent queue is non-empty, each time it is processed the new estimate of the virtual population size is appended to the `world._size` list and the time stamp is appended to `world._ts`. 
+
+When constant-number mode is initiated, we have `world._size[-1] == nmax`. We consider each agent to "represent" `world._size[-1]/nmax` virtual agents, so when a new agent is introduced/eliminated from the collection, we increment/decrement `world._size[-1]` by that amount to obtain our new value. The `world._size` data can later be rescaled to denote a concentration or density of individuals.
