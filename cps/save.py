@@ -60,30 +60,34 @@ def savemat_snapshot(filename, recorder):
     scipy.io.savemat(filename, recorder.log, oned_as='column')
 
 
+try:
 
 import h5py
 import numpy as np
 
-def savehdf_lineage(filename, root_node):
-    sim_data, names = _accumulate(root_node)
-    with h5py.File(filename, 'w') as dfile:
-        dfile = h5py.File(filename,'w')
-        # Tree adjacency list
-        dfile.create_dataset( name='adj_info',
-                              data=np.array(sim_data['adj_info'], dtype=np.bytes_) )
-        dfile.create_dataset( name='adj_data',
-                              data=np.array(sim_data['adj']) )
+    def savehdf_lineage(filename, root_node):
+        sim_data, names = _accumulate(root_node)
+        with h5py.File(filename, 'w') as dfile:
+            dfile = h5py.File(filename,'w')
+            # Tree adjacency list
+            dfile.create_dataset( name='adj_info',
+                                  data=np.array(sim_data['adj_info'], dtype=np.bytes_) )
+            dfile.create_dataset( name='adj_data',
+                                  data=np.array(sim_data['adj']) )
 
-        # Data
-        dfile.create_dataset( name='time',
-                              data=np.array(sim_data['time']) )
-        dfile.create_dataset( name='event',
-                              data=np.array(sim_data['event'], dtype=np.bytes_) )
-        for name in names:
-            dfile.create_dataset(name=name,
-                                 data=np.array(sim_data[name]))
+            # Data
+            dfile.create_dataset( name='time',
+                                  data=np.array(sim_data['time']) )
+            dfile.create_dataset( name='event',
+                                  data=np.array(sim_data['event'], dtype=np.bytes_) )
+            for name in names:
+                dfile.create_dataset(name=name,
+                                     data=np.array(sim_data[name]))
 
-def savehdf_snapshot(filename, recorder):
-    with h5py.File(filename, 'w') as dfile:
-        for name, data in recorder.log.items():
-            dfile.create_dataset(name=name, data=np.array(data))
+    def savehdf_snapshot(filename, recorder):
+        with h5py.File(filename, 'w') as dfile:
+            for name, data in recorder.log.items():
+                dfile.create_dataset(name=name, data=np.array(data))
+
+except ImportError:
+    pass
