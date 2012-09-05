@@ -113,7 +113,7 @@ class FMSimulator(BaseSimulator):
         agents = self.agents
         timetable = self.timetable
 
-        emin, tmin = self._earliestItem() #TODO:should force it to pick agent over world
+        emin, tmin = self._earliestItem()
 
         while (tmin <= tstop):
             if emin is world:
