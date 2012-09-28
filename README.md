@@ -172,8 +172,6 @@ my_model.addInitializer(['stress', 'Kw', 'nw'], ['alive', 'x', 'y'], my_initiali
 
 Recorders and Loggers
 ---------------------
-[Sorry... this and the dependency specification are probably the ugliest parts of the user experience of the framework. They need to be improved!]
-
 The framework currently provides two built-in ways of recording data during a simulation run. The first is an object called a __recorder__ which takes snapshots of all the entities by default. The second is an object called a __logger__, which is attached to a specific agent and records the state of that agent after each firing of its channels. The logger also branches when an agent is cloned and records the history of child agents as well. In other words, a logger stores a tree of nodes containing the event history of the agents in a genealogical lineage. Both recorders and loggers can be customized.
 
 ### Recorders
