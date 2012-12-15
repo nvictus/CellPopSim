@@ -6,3 +6,8 @@ test/
 # ignore these files
 cps-sim.psproj
 todo.txt
+model_2step.py
+model_brownian.py
+model_ode.py
+model_quorum.py
+model_stress2.py

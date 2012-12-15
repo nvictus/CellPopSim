@@ -75,7 +75,7 @@ class DivisionChannel(AgentChannel):
 
 # Create the model...
 
-model = Model(n0=10000, nmax=10000)
+model = Model(n0=100, nmax=100)
 
 def my_init(gdata, cells):
     gdata.kR = 0.8 #0.01
@@ -134,7 +134,7 @@ if __name__=='__main__':
     recorder = sim.recorders[0]
     logger = sim.loggers[0]
 
-    savemat_snapshot('c:/nezar/temp/data/svd_data_0.5.mat', recorder)
+    savemat_snapshot('data/svd_data.mat', recorder)
     #savemat_lineage('data/svd_lineage_02.mat', logger)
 
 
