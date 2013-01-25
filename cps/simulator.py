@@ -319,6 +319,17 @@ class AMSimulator(BaseSimulator):
 
             tsync = world._next_event_time
 
+        if tsync > tstop:
+            not_done = agents
+            while not_done:
+                for agent in not_done:
+                    while agent._enabled and agent._time <= tstop:
+                        agent._processNextChannel() #does not process queue
+                    if self._do_sync:
+                        agent._synchronize(tstop)   #does not process queue
+                # process queue late
+                not_done = self._processAgentQueue()
+
         self.finalize()
 
     def finalize(self):
