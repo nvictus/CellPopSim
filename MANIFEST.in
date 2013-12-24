@@ -1,0 +1,6 @@
+include README.md
+include LICENSE.txt
+include MANIFEST.in
+recursive-include examples *
+recursive-include docs *
+recursive-exclude * .DS_Store

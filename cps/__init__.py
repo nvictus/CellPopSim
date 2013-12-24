@@ -55,6 +55,5 @@ del AgentQueue
 # Release info
 __author__   = '%s <%s>\n' % ('Nezar Abdennur', 'nabdennur@gmail.com')
 __license__  = 'BSD'
-__date__ = None
-__version__ = None
+__version__ = "0.1"
 
