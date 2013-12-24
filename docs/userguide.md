@@ -1,16 +1,16 @@
 How to set up a CellPopSim model
 ================================
 
-*   [Import the module](#import)
-*   [Define your channels](#channels)
-    *   [State-updating events](#channels-state)
-    *   [Birth-death events](#channels-bd)
-    *   [Manual firing](#channels-manual)
-*   [Create a model object](#model)
-*   [Register recorders and loggers](#recording)
-*   [Run a simulation](#simulate)
-*   [Saving simulation data](#saving)
-*   [Additional info](#extra)
+*   [Import the module](#import-the-module)
+*   [Define your channels](#define-your-channels)
+    *   [State-updating events](#state-updating-events)
+    *   [Birth-death events](#birth-death-events)
+    *   [Manual firing](#manual-firing)
+*   [Create a model object](#create-a-model-object)
+*   [Register recorders and loggers](#register-recorders-and-loggers)
+*   [Run a simulation](#run-a-simulation)
+*   [Saving simulation data](#saving-simulation-data)
+*   [Additional info](#additional-info)
 
 <h2 id="import">Import the module</h2>
 To create a model import the `cps` module. 
