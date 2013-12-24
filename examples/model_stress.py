@@ -92,6 +92,9 @@ class DivDeathChannel(AgentChannel):
             raise SimulationError
 
 if __name__=='__main__':
+    from os import path
+    DATA_PATH = path.join(path.abspath(path.pardir), 'data')
+
     for tau in [1.338]:
         # Create model...
         ncrit = 1000
@@ -150,7 +153,7 @@ if __name__=='__main__':
         print(sim.nbirths, sim.ndeaths)
 
 
-        filename = 'c:/users/nezar/temp/data/stress0_T' + str(tau) + '.mat'
+        filename = path.join(DATA_PATH, 'stress0_T' + str(tau) + '.mat')
         savemat_snapshot(filename, sim.recorders[0])
         #savemat_lineage('data/stress_lineage.mat', sim.loggers[0])
         #savehdf_lineage('data/test2.hdf5', root)
@@ -161,7 +164,7 @@ if __name__=='__main__':
         #plt.plot(t,[si/ncrit for si in s],'-*')
         #plt.show()
         import scipy.io
-        scipy.io.savemat('c:/users/nezar/temp/data/stress0p_T' + str(tau) + '.mat', {'t':t, 'size':s}, oned_as='column')
+        scipy.io.savemat(path.join(DATA_PATH, 'stress0p_T' + str(tau) + '.mat'), {'t':t, 'size':s}, oned_as='column')
 
         #import pickle
         #pickle.dump(recorder, 'tmp1.p')

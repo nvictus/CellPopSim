@@ -124,6 +124,9 @@ model.addAgentChannel(channel=dc, ac_dependents=[gc,vc])
 
 
 if __name__=='__main__':
+    from os import path
+    DATA_PATH = path.join(path.abspath(path.pardir), 'data')
+
     #sim = FMSimulator(model, 0)
     sim = AMSimulator(model, 0)
 
@@ -134,7 +137,7 @@ if __name__=='__main__':
     recorder = sim.recorders[0]
     logger = sim.loggers[0]
 
-    savemat_snapshot('data/svd_data.mat', recorder)
+    savemat_snapshot(path.join(DATA_PATH, 'svd_data.mat'), recorder)
     #savemat_lineage('data/svd_lineage_02.mat', logger)
 
 

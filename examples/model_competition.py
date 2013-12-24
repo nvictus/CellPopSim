@@ -307,7 +307,8 @@ model.addAgentChannel(channel=Cbar, ac_dependents=[Cdiv])
 
 
 
-
+from os import path
+DATA_PATH = path.join(path.abspath(path.pardir), 'data')
 # Run the simulation
 if __name__ == '__main__':
     sim = FMSimulator(model, 0)
@@ -317,10 +318,11 @@ if __name__ == '__main__':
     t = time.time()
     print(t-t0)
 
-    savemat_snapshot('c:/users/nezar/temp/competition-model/snapshot_test.mat', sim.recorders[0])
+    savemat_snapshot(path.join(DATA_PATH, 'snapshot_test.mat'),
+        sim.recorders[0])
     #savemat_lineage('c:/users/nezar/temp/competition-model/lineage.mat', sim.loggers[0])
 
     import scipy.io
     size_data = {'t':sim.world._ts, 'sz':sim.world._size}
-    scipy.io.savemat('c:/users/nezar/temp/competition-model/size.mat', size_data, oned_as='column')
+    scipy.io.savemat(path.join(DATA_PATH, 'size.mat'), size_data, oned_as='column')
 
