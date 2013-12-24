@@ -6,7 +6,6 @@ Created:     23/04/2012
 Copyright:   (c) Nezar Abdennur 2012
 
 """
-#!/usr/bin/env python
 import cps.entity
 import cps.logging
 import cps.misc

@@ -6,7 +6,6 @@ Created:
 Copyright:   (c) Nezar Abdennur 2012
 
 """
-#!/usr/bin/env python
 #-------------------------------------------------------------------------------
 # These functions convert recorded data into numpy arrays and save them to disk
 # in hdf5 format.
