@@ -6,8 +6,6 @@ Created:     26/01/2012
 Copyright:   (c) Nezar Abdennur 2012
 
 """
-#!/usr/bin/env python
-
 import collections
 import heapq
 
@@ -107,7 +105,7 @@ class IndexedPriorityQueue(collections.MutableMapping):
             heap[pos].pkey = pkey
             parent_pos = (pos - 1) >> 1
             child_pos = 2*pos + 1
-            if parent_pos > 0 and heap[pos] < heap[parent_pos]:
+            if parent_pos > -1 and heap[pos] < heap[parent_pos]:
                 self._swim(pos)
             elif child_pos < len(heap):
                 right_pos = child_pos + 1
@@ -138,7 +136,7 @@ class IndexedPriorityQueue(collections.MutableMapping):
                 finder[last.item] = pos
                 parent_pos = (pos - 1) >> 1
                 child_pos = 2*pos + 1
-                if parent_pos > 0 and heap[pos] < heap[parent_pos]:
+                if parent_pos > -1 and heap[pos] < heap[parent_pos]:
                     self._swim(pos)
                 elif child_pos < len(heap):
                     right_pos = child_pos + 1
@@ -195,7 +193,7 @@ class IndexedPriorityQueue(collections.MutableMapping):
                 finder[last.item] = pos
                 parent_pos = (pos - 1) >> 1
                 child_pos = 2*pos + 1
-                if parent_pos > 0 and heap[pos] < heap[parent_pos]:
+                if parent_pos > -1 and heap[pos] < heap[parent_pos]:
                     self._swim(pos)
                 elif child_pos < len(heap):
                     right_pos = child_pos + 1
