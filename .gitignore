@@ -1,11 +1,12 @@
 # ignore contents of these folders
 __pycache__/
 data/
-test/
+build/
+dist/
+_junk/
 
 # ignore these files
-cps-sim.psproj
-todo.txt
+MANIFEST
 model_2step.py
 model_brownian.py
 model_ode.py
